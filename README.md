@@ -15,10 +15,6 @@ Herramienta de un solo archivo (`index.html`) para revisar KDMs sin necesitar el
 
 Todo se procesa en el navegador; no se sube ningún archivo. No tiene dependencias externas: funciona sin conexión y desde GitHub Pages.
 
-## Publicar en GitHub Pages
-1. Crea un repositorio nuevo (por ejemplo `kdm-lector`) y sube `index.html` y este README.
-2. Ve a Settings → Pages → Source: *Deploy from a branch*, rama `main`, carpeta `/ (root)`.
-3. Quedará publicado en `https://pabloogooitia.github.io/kdm-lector/`.
 
 ## Changelog
 - **v1.0** (31/10/2026): primera versión.
