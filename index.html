@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lector de KDMs</title>
+<!--
+  Babel · Lector de KDMs — v1.0
+  Lee archivos .zip / .xml de KDMs y muestra película, servidor/sala y periodo de validez.
+  Todo se procesa en el navegador: los archivos no se suben a ningún sitio.
+  Código ES5 sin dependencias. El descompresor deflate es un port de tiny-inflate
+  (Devon Govett, licencia MIT), basado en tinf de Joergen Ibsen.
+-->
+<style>
+:root{
+  --bg:#f4f2ee; --panel:#ffffff; --panel-2:#f8f7f4; --ink:#1b1b1b; --muted:#6b6862;
+  --line:#dedad3; --accent:#1b1b1b; --accent-ink:#ffffff;
+  --ok:#1f7a3f; --ok-bg:#e3f2e8; --warn:#8a5a00; --warn-bg:#fbf0d6;
+  --bad:#a52a1e; --bad-bg:#f8e1dd; --wait:#2d55a3; --wait-bg:#e2e9f7;
+  --chip:#ece9e3; --drop:#faf9f6;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#141414; --panel:#1d1d1d; --panel-2:#232323; --ink:#ecebe8; --muted:#9a968f;
+    --line:#333131; --accent:#ecebe8; --accent-ink:#141414;
+    --ok:#6fd08f; --ok-bg:#1b3324; --warn:#f0c062; --warn-bg:#3a2f15;
+    --bad:#ff8a7a; --bad-bg:#3d1f1b; --wait:#8fb0f2; --wait-bg:#1d2a44;
+    --chip:#2b2a28; --drop:#1a1a1a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#141414; --panel:#1d1d1d; --panel-2:#232323; --ink:#ecebe8; --muted:#9a968f;
+  --line:#333131; --accent:#ecebe8; --accent-ink:#141414;
+  --ok:#6fd08f; --ok-bg:#1b3324; --warn:#f0c062; --warn-bg:#3a2f15;
+  --bad:#ff8a7a; --bad-bg:#3d1f1b; --wait:#8fb0f2; --wait-bg:#1d2a44;
+  --chip:#2b2a28; --drop:#1a1a1a;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 40px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+h1 small{font-size:12px;font-weight:500;color:var(--muted);margin-left:6px;letter-spacing:0}
+.sub{color:var(--muted);font-size:13px;margin-top:2px}
+button,.btn{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:7px 12px;border-radius:8px;cursor:pointer;white-space:nowrap}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:default}
+input[type=text],input[type=date],input[type=search]{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:6px 9px;border-radius:8px}
+#drop{border:2px dashed var(--line);border-radius:14px;background:var(--drop);padding:26px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+#drop.over{border-color:var(--ink);background:var(--panel-2)}
+#drop strong{display:block;font-size:16px;margin-bottom:4px}
+#drop span{color:var(--muted);font-size:13px}
+#drop.compact{padding:12px 16px}
+#drop.compact strong{display:inline;font-size:14px;margin:0 6px 0 0}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:16px 0 10px}
+.toolbar .grow{flex:1 1 180px}
+.toolbar .grow input{width:100%}
+.periodo{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px}
+.stat{font-size:12px;padding:4px 10px;border-radius:999px;background:var(--chip);color:var(--ink);cursor:pointer;border:1px solid transparent}
+.stat.on{border-color:var(--ink)}
+.stat b{font-weight:700}
+.tablewrap{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;background:var(--panel-2);white-space:nowrap}
+tr.row{cursor:pointer}
+tr.row:hover td{background:var(--panel-2)}
+tr.group td{background:var(--panel-2);padding:12px 12px 10px}
+tr.group .film{font-size:16px;font-weight:700}
+tr.det td{background:var(--panel-2);font-size:12px;color:var(--muted)}
+tr:last-child td{border-bottom:none}
+.film{font-weight:600}
+.chips{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
+.chip{font-size:11px;padding:1px 7px;border-radius:5px;background:var(--chip);color:var(--ink);white-space:nowrap}
+.raw{font-size:11px;color:var(--muted);word-break:break-all;margin-top:3px}
+.sala{font-weight:600}
+.dev{font-size:11px;color:var(--muted)}
+.date{white-space:nowrap}
+.date .t{font-weight:600}
+.date .u{font-size:11px;color:var(--muted)}
+.badge{display:inline-block;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.b-ok{color:var(--ok);background:var(--ok-bg)}
+.b-warn{color:var(--warn);background:var(--warn-bg)}
+.b-bad{color:var(--bad);background:var(--bad-bg)}
+.b-wait{color:var(--wait);background:var(--wait-bg)}
+.b-none{color:var(--muted);background:var(--chip)}
+.hint{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap}
+.kv{display:table;width:100%}
+.kv div{display:table-row}
+.kv span{display:table-cell;padding:2px 10px 2px 0;word-break:break-all}
+.kv span:first-child{white-space:nowrap;color:var(--muted);width:1%}
+.kv span:last-child{color:var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+.empty{padding:30px;text-align:center;color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:16px}
+.panel h2{font-size:14px;margin:0 0 4px}
+.panel p{margin:0 0 10px;font-size:12px;color:var(--muted)}
+.srv{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.srv:first-of-type{border-top:none}
+.srv code{font-size:12px;flex:1 1 260px;word-break:break-all}
+.srv input{width:150px}
+.errors{margin-top:12px;font-size:12px;color:var(--bad)}
+.errors div{padding:2px 0}
+footer{margin-top:26px;font-size:11px;color:var(--muted);text-align:center}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--accent);color:var(--accent-ink);padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Lector de KDMs <small>v1.0</small></h1>
+      <div class="sub">Arrastra los .zip o .xml que manda la distribuidora para ver la validez de cada clave.</div>
+    </div>
+    <div>
+      <button id="btnTheme" title="Cambiar entre modo claro y oscuro">Claro / oscuro</button>
+    </div>
+  </header>
+
+  <div id="drop" tabindex="0">
+    <strong>Suelta aquí los archivos de KDM</strong>
+    <span>o haz clic para elegirlos · .zip y .xml · puedes cargar varios a la vez</span>
+    <input id="file" type="file" multiple accept=".zip,.xml,application/zip,text/xml" class="hidden">
+  </div>
+
+  <div id="results" class="hidden">
+    <div class="toolbar">
+      <div class="grow"><input id="q" type="search" placeholder="Buscar película, sala o servidor…"></div>
+      <div class="periodo">
+        Comprobar periodo
+        <input id="pFrom" type="date" title="Primer día de proyección">
+        →
+        <input id="pTo" type="date" title="Último día de proyección">
+        <button id="pClear" title="Quitar periodo">✕</button>
+      </div>
+      <button id="btnCopy">Copiar resumen</button>
+      <button id="btnCsv">CSV</button>
+      <button id="btnClear">Vaciar</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Sala · servidor</th>
+            <th>Válida desde</th>
+            <th>Válida hasta</th>
+            <th>Estado</th>
+            <th id="thPeriodo" class="hidden">Periodo</th>
+            <th>CPL</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel" id="srvPanel">
+      <h2>Nombres de sala</h2>
+      <p>Pon nombre a cada servidor una vez y se recordará en este navegador para las próximas KDMs.</p>
+      <div id="srvList"></div>
+    </div>
+  </div>
+
+  <div class="errors" id="errors"></div>
+
+  <footer>
+    Las horas se muestran en la hora local de este equipo. Los archivos se leen en el navegador y no se envían a ningún servidor.
+  </footer>
+</div>
+<div id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+
+/* ================================================================
+   Inflate (deflate raw) — port ES5 de tiny-inflate / tinf
+   ================================================================ */
+var Inflate = (function(){
+  function Tree(){ this.table = new Uint16Array(16); this.trans = new Uint16Array(288); }
+  var sltree = new Tree(), sdtree = new Tree(), ltree = new Tree(), dtree = new Tree(), codeTree = new Tree();
+  var lengthBits = new Uint8Array(30), lengthBase = new Uint16Array(30);
+  var distBits = new Uint8Array(30), distBase = new Uint16Array(30);
+  var clcidx = [16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15];
+  var lengths = new Uint8Array(288 + 32);
+  var offs = new Uint16Array(16);
+
+  function buildBitsBase(bits, base, delta, first){
+    var i, sum;
+    for (i = 0; i < delta; ++i) bits[i] = 0;
+    for (i = 0; i < 30 - delta; ++i) bits[i + delta] = (i / delta) | 0;
+    for (sum = first, i = 0; i < 30; ++i){ base[i] = sum; sum += 1 << bits[i]; }
+  }
+  function buildFixedTrees(lt, dt){
+    var i;
+    for (i = 0; i < 7; ++i) lt.table[i] = 0;
+    lt.table[7] = 24; lt.table[8] = 152; lt.table[9] = 112;
+    for (i = 0; i < 24; ++i) lt.trans[i] = 256 + i;
+    for (i = 0; i < 144; ++i) lt.trans[24 + i] = i;
+    for (i = 0; i < 8; ++i) lt.trans[24 + 144 + i] = 280 + i;
+    for (i = 0; i < 112; ++i) lt.trans[24 + 144 + 8 + i] = 144 + i;
+    for (i = 0; i < 5; ++i) dt.table[i] = 0;
+    dt.table[5] = 32;
+    for (i = 0; i < 32; ++i) dt.trans[i] = i;
+  }
+  function buildTree(t, lens, off, num){
+    var i, sum;
+    for (i = 0; i < 16; ++i) t.table[i] = 0;
+    for (i = 0; i < num; ++i) t.table[lens[off + i]]++;
+    t.table[0] = 0;
+    for (sum = 0, i = 0; i < 16; ++i){ offs[i] = sum; sum += t.table[i]; }
+    for (i = 0; i < num; ++i){ if (lens[off + i]) t.trans[offs[lens[off + i]]++] = i; }
+  }
+  function getbit(d){
+    if (!d.bitcount--){ d.tag = d.source[d.sourceIndex++] | 0; d.bitcount = 7; }
+    var bit = d.tag & 1; d.tag >>>= 1; return bit;
+  }
+  function readBits(d, num, base){
+    if (!num) return base;
+    while (d.bitcount < 24){ d.tag |= (d.source[d.sourceIndex++] | 0) << d.bitcount; d.bitcount += 8; }
+    var val = d.tag & (0xffff >>> (16 - num));
+    d.tag >>>= num; d.bitcount -= num;
+    return val + base;
+  }
+  function decodeSymbol(d, t){
+    while (d.bitcount < 24){ d.tag |= (d.source[d.sourceIndex++] | 0) << d.bitcount; d.bitcount += 8; }
+    var sum = 0, cur = 0, len = 0, tag = d.tag;
+    do {
+      cur = 2 * cur + (tag & 1); tag >>>= 1; ++len;
+      if (len > 15) throw new Error('Datos comprimidos corruptos');
+      sum += t.table[len]; cur -= t.table[len];
+    } while (cur >= 0);
+    d.tag = tag; d.bitcount -= len;
+    return t.trans[sum + cur];
+  }
+  function decodeTrees(d, lt, dt){
+    var hlit, hdist, hclen, i, num, length, sym, prev;
+    hlit = readBits(d, 5, 257); hdist = readBits(d, 5, 1); hclen = readBits(d, 4, 4);
+    for (i = 0; i < 19; ++i) lengths[i] = 0;
+    for (i = 0; i < hclen; ++i) lengths[clcidx[i]] = readBits(d, 3, 0);
+    buildTree(codeTree, lengths, 0, 19);
+    for (num = 0; num < hlit + hdist;){
+      sym = decodeSymbol(d, codeTree);
+      if (sym === 16){ prev = lengths[num - 1]; for (length = readBits(d, 2, 3); length; --length) lengths[num++] = prev; }
+      else if (sym === 17){ for (length = readBits(d, 3, 3); length; --length) lengths[num++] = 0; }
+      else if (sym === 18){ for (length = readBits(d, 7, 11); length; --length) lengths[num++] = 0; }
+      else lengths[num++] = sym;
+    }
+    buildTree(lt, lengths, 0, hlit);
+    buildTree(dt, lengths, hlit, hdist);
+  }
+  function ensure(d, extra){
+    if (d.destLen + extra <= d.dest.length) return;
+    var n = new Uint8Array(Math.max(d.dest.length * 2, d.destLen + extra + 1024));
+    n.set(d.dest.subarray(0, d.destLen)); d.dest = n;
+  }
+  function inflateBlockData(d, lt, dt){
+    for (;;){
+      var sym = decodeSymbol(d, lt);
+      if (sym === 256) return;
+      if (sym < 256){ ensure(d, 1); d.dest[d.destLen++] = sym; }
+      else {
+        sym -= 257;
+        var length = readBits(d, lengthBits[sym], lengthBase[sym]);
+        var dist = decodeSymbol(d, dt);
+        var start = d.destLen - readBits(d, distBits[dist], distBase[dist]);
+        if (start < 0) throw new Error('Datos comprimidos corruptos');
+        ensure(d, length);
+        for (var i = start; i < start + length; ++i) d.dest[d.destLen++] = d.dest[i];
+      }
+    }
+  }
+  function inflateUncompressed(d){
+    while (d.bitcount > 8){ d.sourceIndex--; d.bitcount -= 8; }
+    var length = d.source[d.sourceIndex + 1] * 256 + d.source[d.sourceIndex];
+    d.sourceIndex += 4;
+    ensure(d, length);
+    for (var i = length; i; --i) d.dest[d.destLen++] = d.source[d.sourceIndex++];
+    d.bitcount = 0;
+  }
+  buildFixedTrees(sltree, sdtree);
+  buildBitsBase(lengthBits, lengthBase, 4, 3);
+  buildBitsBase(distBits, distBase, 2, 1);
+  lengthBits[28] = 0; lengthBase[28] = 258;
+
+  return function inflate(source, sizeHint){
+    var d = { source: source, sourceIndex: 0, tag: 0, bitcount: 0, dest: new Uint8Array(sizeHint > 0 ? sizeHint : 65536), destLen: 0 };
+    var bfinal, btype;
+    do {
+      bfinal = getbit(d);
+      btype = readBits(d, 2, 0);
+      if (btype === 0) inflateUncompressed(d);
+      else if (btype === 1) inflateBlockData(d, sltree, sdtree);
+      else if (btype === 2){ decodeTrees(d, ltree, dtree); inflateBlockData(d, ltree, dtree); }
+      else throw new Error('Bloque deflate no válido');
+      if (d.sourceIndex > source.length + 4) throw new Error('Datos comprimidos incompletos');
+    } while (!bfinal);
+    return d.dest.subarray(0, d.destLen);
+  };
+})();
+
+/* ================================================================
+   Lectura de ZIP (directorio central)
+   ================================================================ */
+function u16(b, o){ return b[o] | (b[o + 1] << 8); }
+function u32(b, o){ return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0; }
+
+function decodeText(bytes, utf8){
+  if (typeof TextDecoder !== 'undefined'){
+    try { return new TextDecoder(utf8 === false ? 'iso-8859-1' : 'utf-8').decode(bytes); } catch(e){}
+  }
+  var s = '';
+  for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  if (utf8 !== false){ try { s = decodeURIComponent(escape(s)); } catch(e){} }
+  return s;
+}
+
+function readZip(bytes){
+  var eocd = -1, min = Math.max(0, bytes.length - 65557);
+  for (var i = bytes.length - 22; i >= min; i--){
+    if (bytes[i] === 0x50 && bytes[i+1] === 0x4b && bytes[i+2] === 0x05 && bytes[i+3] === 0x06){ eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('No parece un ZIP válido');
+  var count = u16(bytes, eocd + 10), p = u32(bytes, eocd + 16), out = [];
+  for (var n = 0; n < count; n++){
+    if (u32(bytes, p) !== 0x02014b50) throw new Error('ZIP dañado (directorio central)');
+    var flags = u16(bytes, p + 8), method = u16(bytes, p + 10);
+    var csize = u32(bytes, p + 20), usize = u32(bytes, p + 24);
+    var nlen = u16(bytes, p + 28), xlen = u16(bytes, p + 30), clen = u16(bytes, p + 32);
+    var loff = u32(bytes, p + 42);
+    var name = decodeText(bytes.subarray(p + 46, p + 46 + nlen), (flags & 0x800) ? true : true);
+    p += 46 + nlen + xlen + clen;
+    if (/\/$/.test(name)) continue;
+    out.push({ name: name, method: method, csize: csize, usize: usize, loff: loff, encrypted: !!(flags & 1) });
+  }
+  return out;
+}
+
+function zipEntryData(bytes, e){
+  if (e.encrypted) throw new Error('el ZIP está protegido con contraseña');
+  if (u32(bytes, e.loff) !== 0x04034b50) throw new Error('ZIP dañado (cabecera local)');
+  var start = e.loff + 30 + u16(bytes, e.loff + 26) + u16(bytes, e.loff + 28);
+  var data = bytes.subarray(start, start + e.csize);
+  if (e.method === 0) return data;
+  if (e.method === 8) return Inflate(data, e.usize);
+  throw new Error('método de compresión no soportado (' + e.method + ')');
+}
+
+/* ================================================================
+   Utilidades de fecha
+   ================================================================ */
+var DIAS = ['dom','lun','mar','mié','jue','vie','sáb'];
+function pad(n){ return (n < 10 ? '0' : '') + n; }
+
+function parseIso(s){
+  if (!s) return null;
+  var m = /^\s*(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)(?::(\d\d)(?:\.\d+)?)?\s*(Z|[+-]\d\d:?\d\d)?\s*$/.exec(s);
+  if (!m) { var d0 = new Date(s); return isNaN(d0.getTime()) ? null : d0; }
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  if (m[7] && m[7] !== 'Z'){
+    var sign = m[7].charAt(0) === '-' ? -1 : 1;
+    var hh = +m[7].substr(1, 2), mm = +m[7].substr(m[7].length - 2, 2);
+    t -= sign * (hh * 60 + mm) * 60000;
+  } else if (!m[7]) {
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  }
+  return new Date(t);
+}
+function fmtDay(d){ return DIAS[d.getDay()] + ' ' + pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear(); }
+function fmtTime(d){ return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+function fmtShort(d){ return DIAS[d.getDay()] + ' ' + pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + ' ' + fmtTime(d); }
+function fmtSpan(ms){
+  var min = Math.round(Math.abs(ms) / 60000);
+  var d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+  if (d >= 2) return d + ' d' + (h ? ' ' + h + ' h' : '');
+  if (d === 1) return '1 d ' + h + ' h';
+  if (h) return h + ' h' + (m ? ' ' + m + ' min' : '');
+  return m + ' min';
+}
+function parseDateInput(v, endOfDay){
+  var m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(v || '');
+  if (!m) return null;
+  return endOfDay ? new Date(+m[1], +m[2] - 1, +m[3], 23, 59, 59) : new Date(+m[1], +m[2] - 1, +m[3], 0, 0, 0);
+}
+
+/* ================================================================
+   Lectura de XML (KDM y CPL)
+   ================================================================ */
+function tags(node, name){ return node.getElementsByTagNameNS ? node.getElementsByTagNameNS('*', name) : node.getElementsByTagName(name); }
+function txt(node, name){ var l = tags(node, name); return l.length ? (l[0].textContent || '').replace(/^\s+|\s+$/g, '') : ''; }
+function normUuid(s){ return (s || '').replace(/^urn:uuid:/i, '').toLowerCase().replace(/\s/g, ''); }
+
+var ROLE_WORDS = /^(SM|MD|MDI|MDA|MDS|MDX|MDE|FM|FMI|FMA|LS|LE|PR|CS|RO|LD|SPB|SPB1|SPB2|DC|DS|SMS|IMB|OBAE|LDB)$/i;
+
+function parseSubject(subject){
+  // Extrae el CN y lo separa en roles / dispositivo / modelo
+  var cn = subject, m = /(?:^|,)\s*CN=((?:\\.|[^,])*)/.exec(subject || '');
+  if (m) cn = m[1].replace(/\\(.)/g, '$1');
+  var parts = (cn || '').split('.');
+  var roles = '', first = parts[0] || '';
+  var words = first.split(/\s+/), allRoles = words.length > 0;
+  for (var i = 0; i < words.length; i++){ if (!ROLE_WORDS.test(words[i])) { allRoles = false; break; } }
+  if (allRoles && parts.length > 1){ roles = first; parts.shift(); }
+  var device = parts[0] || cn || '¿?';
+  var model = '';
+  if (parts.length > 1 && !/^(SERVERS|PRODUCTS|CA|COM|NET|ORG)$/i.test(parts[1])) model = parts[1];
+  return { cn: cn, roles: roles, device: device, model: model, key: (device + (model ? '.' + model : '')).toUpperCase() };
+}
+
+var DCNC_TYPES = { FTR:'Largo', TLR:'Tráiler', TSR:'Teaser', ADV:'Publicidad', SHR:'Corto', PSA:'Anuncio', XSN:'Transicional', RTG:'Calificación', POL:'Política', PRO:'Promo', EPS:'Episodio', CLP:'Clip', TST:'Test' };
+
+function parseTitle(title){
+  var t = title || '', p = t.split('_'), chips = [];
+  var film = (p[0] || t).replace(/-/g, ' ');
+  if (p.length < 4) return { film: t, chips: [] };
+  for (var i = 1; i < p.length; i++){
+    var x = p[i], X = x.toUpperCase(), base = X.split('-')[0];
+    if (DCNC_TYPES[base]) chips.push(DCNC_TYPES[base] + (X.length > base.length ? ' ' + x.substr(base.length) : ''));
+    else if (X === 'F') chips.push('Flat');
+    else if (X === 'S') chips.push('Scope');
+    else if (X === 'C') chips.push('Full container');
+    else if (/^F-\d+$|^S-\d+$/.test(X)) chips.push(X.charAt(0) === 'F' ? 'Flat ' + x.substr(2) : 'Scope ' + x.substr(2));
+    else if (/^[A-Z]{2,3}(-[A-Z]{2,3}|-XX)(-[A-Z]{2,4})*$/.test(X) && i <= 4){
+      var ls = X.split('-');
+      chips.push('Audio ' + ls[0] + (ls[1] && ls[1] !== 'XX' ? ' · subs ' + ls[1] : ' · sin subs') + (ls[2] ? ' · ' + ls.slice(2).join('-') : ''));
+    }
+    else if (/^[A-Z]{2,3}$/.test(X) && i === 3) chips.push('Audio ' + X + ' · sin subs');
+    else if (/^(51|71|20|10)(-[A-Z0-9]+)*$/.test(X)) chips.push(X.replace(/^51/, '5.1').replace(/^71/, '7.1').replace(/^20/, '2.0').replace(/^10/, '1.0').replace(/-/g, ' '));
+    else if (/^(ATMOS|IAB|DTSX|AURO|IMAX)/.test(X)) chips.push(x);
+    else if (/^(2K|4K|48|3D|HFR)$/.test(X)) chips.push(X);
+    else if (X === 'SMPTE' || X === 'IOP') chips.push(X === 'IOP' ? 'Interop' : 'SMPTE');
+    else if (X === 'OV' || X === 'VF') chips.push(X === 'OV' ? 'OV' : 'VF');
+  }
+  return { film: film, chips: chips };
+}
+
+function parseKdm(doc, fileName, source){
+  var root = doc.documentElement;
+  var subject = txt(root, 'X509SubjectName');
+  var keyEls = tags(root, 'TypedKeyId'), keys = [];
+  for (var i = 0; i < keyEls.length; i++) keys.push({ type: txt(keyEls[i], 'KeyType'), id: normUuid(txt(keyEls[i], 'KeyId')) });
+  if (!keys.length){
+    var kid = tags(root, 'KeyId');
+    for (var j = 0; j < kid.length; j++) keys.push({ type: '', id: normUuid(kid[j].textContent) });
+  }
+  var title = txt(root, 'ContentTitleText');
+  var k = {
+    kind: 'kdm',
+    file: fileName, source: source,
+    messageId: normUuid(txt(root, 'MessageId')),
+    annotation: txt(root, 'AnnotationText'),
+    issueDate: parseIso(txt(root, 'IssueDate')),
+    title: title,
+    parsed: parseTitle(title),
+    cplId: normUuid(txt(root, 'CompositionPlaylistId')),
+    fromRaw: txt(root, 'ContentKeysNotValidBefore'),
+    toRaw: txt(root, 'ContentKeysNotValidAfter'),
+    subject: subject,
+    server: parseSubject(subject),
+    issuer: txt(root, 'X509IssuerName'),
+    keys: keys,
+    interop: /interop|digicine/i.test(root.namespaceURI || '') || /Interop/i.test(txt(root, 'MessageType'))
+  };
+  k.from = parseIso(k.fromRaw); k.to = parseIso(k.toRaw);
+  return k;
+}
+
+function parseCpl(doc, fileName){
+  var root = doc.documentElement;
+  var keyEls = tags(root, 'KeyId'), keys = {};
+  for (var i = 0; i < keyEls.length; i++) keys[normUuid(keyEls[i].textContent)] = true;
+  var frames = 0, rate = 0, pics = tags(root, 'MainPicture');
+  if (!pics.length) pics = tags(root, 'MainStereoscopicPicture');
+  for (var j = 0; j < pics.length; j++){
+    var dur = +txt(pics[j], 'Duration') || +txt(pics[j], 'IntrinsicDuration') || 0;
+    var er = (txt(pics[j], 'EditRate') || '24 1').split(/\s+/);
+    var r = (+er[0] || 24) / (+er[1] || 1);
+    frames += dur / r; rate = r;
+  }
+  return {
+    kind: 'cpl', file: fileName,
+    id: normUuid(txt(root, 'Id')),
+    title: txt(root, 'ContentTitleText'),
+    encrypted: Object.keys(keys).length > 0,
+    keys: keys,
+    seconds: Math.round(frames),
+    issuer: txt(root, 'Issuer')
+  };
+}
+
+/* ================================================================
+   Estado
+   ================================================================ */
+var LS_SALAS = 'babel.kdmlector.salas', LS_THEME = 'babel.kdmlector.theme';
+var state = { kdms: [], cpls: {}, errors: [], open: {}, filter: '', statusFilter: '' };
+var salas = {};
+try { salas = JSON.parse(localStorage.getItem(LS_SALAS) || '{}') || {}; } catch(e){ salas = {}; }
+
+function saveSalas(){ try { localStorage.setItem(LS_SALAS, JSON.stringify(salas)); } catch(e){} }
+function salaName(k){ return salas[k.server.key] || ''; }
+
+function statusOf(k, now){
+  if (!k.from || !k.to) return { code: 'none', label: 'Fechas ilegibles', cls: 'b-none', hint: '' };
+  if (now < k.from) return { code: 'wait', label: 'Aún no válida', cls: 'b-wait', hint: 'empieza en ' + fmtSpan(k.from - now) };
+  if (now > k.to) return { code: 'bad', label: 'Caducada', cls: 'b-bad', hint: 'hace ' + fmtSpan(now - k.to) };
+  var left = k.to - now;
+  if (left < 48 * 3600000) return { code: 'warn', label: 'Caduca pronto', cls: 'b-warn', hint: 'quedan ' + fmtSpan(left) };
+  return { code: 'ok', label: 'Válida', cls: 'b-ok', hint: 'quedan ' + fmtSpan(left) };
+}
+
+function periodOf(k, pFrom, pTo){
+  if (!pFrom && !pTo) return null;
+  if (!k.from || !k.to) return { ok: false, label: '¿?', cls: 'b-none', hint: '' };
+  var a = pFrom || pTo, b = pTo || pFrom;
+  if (k.from > a) return { ok: false, label: 'No cubre', cls: 'b-bad', hint: 'empieza ' + fmtShort(k.from) };
+  if (k.to < b) return { ok: false, label: 'No cubre', cls: 'b-bad', hint: 'acaba ' + fmtShort(k.to) };
+  return { ok: true, label: 'Cubre', cls: 'b-ok', hint: '' };
+}
+
+function cplCheck(k){
+  var c = state.cpls[k.cplId];
+  if (!c) return null;
+  var missing = 0, total = 0, have = {};
+  for (var i = 0; i < k.keys.length; i++) have[k.keys[i].id] = true;
+  for (var id in c.keys){ if (c.keys.hasOwnProperty(id)){ total++; if (!have[id]) missing++; } }
+  return { cpl: c, total: total, missing: missing };
+}
+
+/* ================================================================
+   Carga de archivos
+   ================================================================ */
+function readFile(file){
+  return new Promise(function(resolve, reject){
+    var r = new FileReader();
+    r.onload = function(){ resolve(new Uint8Array(r.result)); };
+    r.onerror = function(){ reject(new Error('No se pudo leer el archivo')); };
+    r.readAsArrayBuffer(file);
+  });
+}
+
+function isZip(b){ return b.length > 4 && b[0] === 0x50 && b[1] === 0x4b && (b[2] === 0x03 || b[2] === 0x05); }
+
+function handleBytes(bytes, name, source, depth){
+  if (isZip(bytes)){
+    if (depth > 3) return;
+    var entries = readZip(bytes);
+    for (var i = 0; i < entries.length; i++){
+      var e = entries[i], base = e.name.split('/').pop();
+      if (/^\./.test(base) || /^__MACOSX\//.test(e.name)) continue;
+      if (!/\.(xml|zip|kdm)$/i.test(base)) continue;
+      try { handleBytes(zipEntryData(bytes, e), base, name, depth + 1); }
+      catch(err){ state.errors.push(name + ' › ' + base + ': ' + err.message); }
+    }
+    return;
+  }
+  var text = decodeText(bytes, true);
+  if (text.indexOf('<') < 0) { state.errors.push(name + ': no es XML'); return; }
+  var doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (tags(doc, 'parsererror').length || !doc.documentElement){ state.errors.push(name + ': XML no válido'); return; }
+  var rootName = doc.documentElement.localName || doc.documentElement.nodeName;
+  if (rootName === 'DCinemaSecurityMessage'){
+    var k = parseKdm(doc, name, source);
+    for (var j = 0; j < state.kdms.length; j++){ if (k.messageId && state.kdms[j].messageId === k.messageId) return; }
+    state.kdms.push(k);
+  } else if (rootName === 'CompositionPlaylist'){
+    var c = parseCpl(doc, name);
+    if (c.id) state.cpls[c.id] = c;
+  }
+}
+
+function loadFiles(list){
+  var files = [];
+  for (var i = 0; i < list.length; i++) files.push(list[i]);
+  if (!files.length) return;
+  var before = state.kdms.length;
+  var chain = Promise.resolve();
+  files.forEach(function(f){
+    chain = chain.then(function(){
+      return readFile(f).then(function(b){
+        try { handleBytes(b, f.name, '', 0); }
+        catch(err){ state.errors.push(f.name + ': ' + err.message); }
+      }, function(err){ state.errors.push(f.name + ': ' + err.message); });
+    });
+  });
+  chain.then(function(){
+    var added = state.kdms.length - before;
+    render();
+    if (added) toast(added + (added === 1 ? ' KDM cargada' : ' KDMs cargadas'));
+    else if (!state.errors.length) toast('No se ha encontrado ninguna KDM nueva');
+  });
+}
+
+/* ================================================================
+   Pintado
+   ================================================================ */
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+
+function sorted(){
+  return state.kdms.slice().sort(function(a, b){
+    var fa = a.parsed.film.toLowerCase(), fb = b.parsed.film.toLowerCase();
+    if (fa !== fb) return fa < fb ? -1 : 1;
+    if (a.title !== b.title) return a.title < b.title ? -1 : 1;
+    var sa = (salaName(a) || 'zzz' + a.server.device).toLowerCase(), sb = (salaName(b) || 'zzz' + b.server.device).toLowerCase();
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    return (a.from || 0) - (b.from || 0);
+  });
+}
+
+function getPeriod(){
+  var a = parseDateInput($('pFrom').value, false), b = parseDateInput($('pTo').value, true);
+  if (a && b && b < a){ var t = parseDateInput($('pFrom').value, true); b = t; }
+  return { from: a, to: b };
+}
+
+function matches(k, q){
+  if (!q) return true;
+  var hay = (k.title + ' ' + k.parsed.film + ' ' + salaName(k) + ' ' + k.server.cn + ' ' + k.file).toLowerCase();
+  var parts = q.toLowerCase().split(/\s+/);
+  for (var i = 0; i < parts.length; i++) if (parts[i] && hay.indexOf(parts[i]) < 0) return false;
+  return true;
+}
+
+function dateCell(d, raw){
+  if (!d) return '<span class="date">' + esc(raw || '—') + '</span>';
+  return '<div class="date" title="Original: ' + esc(raw) + '"><span class="t">' + fmtDay(d) + '</span><br>' + fmtTime(d) + ' h</div>';
+}
+
+function render(){
+  var has = state.kdms.length > 0;
+  $('results').className = has ? '' : 'hidden';
+  $('drop').className = has ? 'compact' : '';
+  renderErrors();
+  if (!has) return;
+
+  var now = new Date(), per = getPeriod(), hasPer = !!(per.from || per.to);
+  var q = state.filter, list = sorted(), rows = [], counts = { ok:0, warn:0, wait:0, bad:0, none:0, nocover:0 };
+  $('thPeriodo').className = hasPer ? '' : 'hidden';
+  var cols = hasPer ? 6 : 5;
+  var lastTitle = null, shown = 0;
+
+  for (var i = 0; i < list.length; i++){
+    var k = list[i], st = statusOf(k, now), pe = periodOf(k, per.from, per.to);
+    counts[st.code]++;
+    if (pe && !pe.ok) counts.nocover++;
+    if (!matches(k, q)) continue;
+    if (state.statusFilter === 'nocover'){ if (!pe || pe.ok) continue; }
+    else if (state.statusFilter && st.code !== state.statusFilter) continue;
+    shown++;
+
+    if (k.title !== lastTitle){
+      lastTitle = k.title;
+      var chips = '';
+      for (var c = 0; c < k.parsed.chips.length; c++) chips += '<span class="chip">' + esc(k.parsed.chips[c]) + '</span>';
+      rows.push('<tr class="group"><td colspan="' + cols + '"><div class="film">' + esc(k.parsed.film) + '</div>' +
+        (chips ? '<div class="chips">' + chips + '</div>' : '') +
+        '<div class="raw">' + esc(k.title) + '</div></td></tr>');
+    }
+    var sala = salaName(k);
+    var cc = cplCheck(k), cplHtml;
+    if (!cc) cplHtml = '<span class="badge b-none" title="No se ha cargado la CPL de esta KDM">—</span>';
+    else if (cc.missing) cplHtml = '<span class="badge b-bad">Faltan ' + cc.missing + ' de ' + cc.total + ' claves</span>';
+    else cplHtml = '<span class="badge b-ok">Coincide</span><div class="hint">' + cc.total + ' claves' + (cc.cpl.seconds ? ' · ' + fmtDur(cc.cpl.seconds) : '') + '</div>';
+
+    var idx = state.kdms.indexOf(k);
+    rows.push(
+      '<tr class="row" data-i="' + idx + '">' +
+        '<td>' + (sala ? '<div class="sala">' + esc(sala) + '</div>' : '<div class="sala" style="color:var(--muted)">Sin asignar</div>') +
+          '<div class="dev">' + esc(k.server.device) + (k.server.model ? ' · ' + esc(k.server.model) : '') + (k.interop ? ' · Interop' : '') + '</div></td>' +
+        '<td>' + dateCell(k.from, k.fromRaw) + '</td>' +
+        '<td>' + dateCell(k.to, k.toRaw) + '</td>' +
+        '<td><span class="badge ' + st.cls + '">' + st.label + '</span>' + (st.hint ? '<div class="hint">' + esc(st.hint) + '</div>' : '') + '</td>' +
+        (hasPer ? '<td><span class="badge ' + pe.cls + '">' + pe.label + '</span>' + (pe.hint ? '<div class="hint">' + esc(pe.hint) + '</div>' : '') + '</td>' : '') +
+        '<td>' + cplHtml + '</td>' +
+      '</tr>'
+    );
+    if (state.open[idx]){
+      rows.push('<tr class="det"><td colspan="' + cols + '"><div class="kv">' +
+        kv('Archivo', k.file + (k.source ? '  (en ' + k.source + ')' : '')) +
+        kv('Servidor (CN)', k.server.cn) +
+        (k.server.roles ? kv('Roles', k.server.roles) : '') +
+        kv('CPL Id', k.cplId) +
+        (cc ? kv('CPL', cc.cpl.title + (cc.cpl.issuer ? ' — ' + cc.cpl.issuer : '')) : '') +
+        kv('Claves', k.keys.length + ' (' + keyTypes(k.keys) + ')') +
+        kv('Emitida', k.issueDate ? fmtDay(k.issueDate) + ' ' + fmtTime(k.issueDate) : '—') +
+        kv('Desde (original)', k.fromRaw) +
+        kv('Hasta (original)', k.toRaw) +
+        kv('Emisor', k.issuer) +
+        kv('MessageId', k.messageId) +
+        kv('Annotation', k.annotation) +
+      '</div></td></tr>');
+    }
+  }
+  if (!shown) rows.push('<tr><td colspan="' + cols + '" class="empty">Ninguna KDM coincide con el filtro.</td></tr>');
+  $('tbody').innerHTML = rows.join('');
+
+  var total = state.kdms.length;
+  var st = '<span class="stat' + (state.statusFilter === '' ? ' on' : '') + '" data-f=""><b>' + total + '</b> KDM' + (total === 1 ? '' : 's') + '</span>';
+  if (counts.ok) st += stat('ok', counts.ok, 'válidas');
+  if (counts.warn) st += stat('warn', counts.warn, 'caducan pronto');
+  if (counts.wait) st += stat('wait', counts.wait, 'aún no válidas');
+  if (counts.bad) st += stat('bad', counts.bad, 'caducadas');
+  if (hasPer && counts.nocover) st += stat('nocover', counts.nocover, 'no cubren el periodo');
+  $('stats').innerHTML = st;
+
+  renderServers();
+}
+function stat(code, n, label){ return '<span class="stat' + (state.statusFilter === code ? ' on' : '') + '" data-f="' + code + '"><b>' + n + '</b> ' + label + '</span>'; }
+function kv(a, b){ return '<div><span>' + esc(a) + '</span><span>' + esc(b || '—') + '</span></div>'; }
+function keyTypes(keys){
+  var c = {}, out = [];
+  for (var i = 0; i < keys.length; i++){ var t = keys[i].type || '?'; c[t] = (c[t] || 0) + 1; }
+  for (var t2 in c) if (c.hasOwnProperty(t2)) out.push(c[t2] + '× ' + t2);
+  return out.join(', ');
+}
+function fmtDur(s){ var h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return (h ? h + ' h ' : '') + m + ' min'; }
+
+function renderServers(){
+  var seen = {}, out = [];
+  for (var i = 0; i < state.kdms.length; i++){
+    var s = state.kdms[i].server;
+    if (seen[s.key]) continue;
+    seen[s.key] = true;
+    out.push('<div class="srv"><code>' + esc(s.device) + (s.model ? ' · ' + esc(s.model) : '') + '</code>' +
+      '<input type="text" data-k="' + esc(s.key) + '" placeholder="p. ej. Sala 3" value="' + esc(salas[s.key] || '') + '"></div>');
+  }
+  var list = $('srvList');
+  var active = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute('data-k') : null;
+  if (active) return; // no repintar mientras se escribe
+  list.innerHTML = out.join('');
+}
+
+function renderErrors(){
+  var e = state.errors;
+  $('errors').innerHTML = e.length ? e.map(function(x){ return '<div>⚠ ' + esc(x) + '</div>'; }).join('') : '';
+}
+
+/* ================================================================
+   Resumen / exportar
+   ================================================================ */
+function visibleList(){
+  var now = new Date(), per = getPeriod(), out = [];
+  var list = sorted();
+  for (var i = 0; i < list.length; i++){
+    var k = list[i], st = statusOf(k, now), pe = periodOf(k, per.from, per.to);
+    if (!matches(k, state.filter)) continue;
+    if (state.statusFilter === 'nocover'){ if (!pe || pe.ok) continue; }
+    else if (state.statusFilter && st.code !== state.statusFilter) continue;
+    out.push({ k: k, st: st, pe: pe });
+  }
+  return out;
+}
+
+function summaryText(){
+  var rows = visibleList(), lines = [], last = null, per = getPeriod();
+  if (per.from || per.to) lines.push('Periodo comprobado: ' + (per.from ? fmtDay(per.from) : '…') + ' → ' + (per.to ? fmtDay(per.to) : '…'), '');
+  for (var i = 0; i < rows.length; i++){
+    var r = rows[i], k = r.k;
+    if (k.title !== last){ if (last !== null) lines.push(''); lines.push(k.parsed.film.toUpperCase() + '  (' + k.title + ')'); last = k.title; }
+    var sala = salaName(k) || k.server.device;
+    lines.push('  ' + sala + ': ' + (k.from ? fmtShort(k.from) : k.fromRaw) + ' → ' + (k.to ? fmtShort(k.to) : k.toRaw) +
+      '  [' + r.st.label + (r.pe ? ' · ' + r.pe.label + ' periodo' : '') + ']');
+  }
+  return lines.join('\n');
+}
+
+function csvText(){
+  var rows = visibleList(), out = [];
+  var q = function(s){ s = String(s == null ? '' : s); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  out.push(['Pelicula','Version (CPL)','Sala','Servidor','Modelo','Valida desde','Valida hasta','Estado','Periodo','Archivo'].join(';'));
+  for (var i = 0; i < rows.length; i++){
+    var k = rows[i].k;
+    out.push([k.parsed.film, k.title, salaName(k), k.server.device, k.server.model,
+      k.from ? fmtDay(k.from) + ' ' + fmtTime(k.from) : k.fromRaw,
+      k.to ? fmtDay(k.to) + ' ' + fmtTime(k.to) : k.toRaw,
+      rows[i].st.label, rows[i].pe ? rows[i].pe.label : '', k.file].map(q).join(';'));
+  }
+  return '﻿' + out.join('\r\n');
+}
+
+function copy(text){
+  function fallback(){
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false; try { ok = document.execCommand('copy'); } catch(e){}
+    document.body.removeChild(ta);
+    toast(ok ? 'Resumen copiado' : 'No se pudo copiar');
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ toast('Resumen copiado'); }, fallback);
+  } else fallback();
+}
+
+var toastTimer;
+function toast(msg){
+  var t = $('toast'); t.textContent = msg; t.className = 'show';
+  clearTimeout(toastTimer); toastTimer = setTimeout(function(){ t.className = ''; }, 1800);
+}
+
+/* ================================================================
+   Eventos
+   ================================================================ */
+var drop = $('drop'), fileInput = $('file');
+drop.addEventListener('click', function(){ fileInput.click(); });
+drop.addEventListener('keydown', function(e){ if (e.keyCode === 13 || e.keyCode === 32){ e.preventDefault(); fileInput.click(); } });
+fileInput.addEventListener('change', function(){ loadFiles(fileInput.files); fileInput.value = ''; });
+
+var dragDepth = 0;
+document.addEventListener('dragenter', function(e){ e.preventDefault(); dragDepth++; drop.className += ' over'; });
+document.addEventListener('dragleave', function(){ if (--dragDepth <= 0){ dragDepth = 0; drop.className = drop.className.replace(/\s*over/g, ''); } });
+document.addEventListener('dragover', function(e){ e.preventDefault(); });
+document.addEventListener('drop', function(e){
+  e.preventDefault(); dragDepth = 0; drop.className = drop.className.replace(/\s*over/g, '');
+  if (e.dataTransfer && e.dataTransfer.files) loadFiles(e.dataTransfer.files);
+});
+
+$('tbody').addEventListener('click', function(e){
+  var el = e.target;
+  while (el && el !== this && !(el.getAttribute && el.getAttribute('data-i') !== null)) el = el.parentNode;
+  if (!el || el === this) return;
+  var i = +el.getAttribute('data-i');
+  state.open[i] = !state.open[i];
+  render();
+});
+
+$('stats').addEventListener('click', function(e){
+  var el = e.target;
+  while (el && el !== this && !(el.getAttribute && el.getAttribute('data-f') !== null)) el = el.parentNode;
+  if (!el || el === this) return;
+  var f = el.getAttribute('data-f');
+  state.statusFilter = (state.statusFilter === f) ? '' : f;
+  render();
+});
+
+$('q').addEventListener('input', function(){ state.filter = this.value; render(); });
+$('pFrom').addEventListener('change', function(){ if (!$('pTo').value) $('pTo').value = this.value; render(); });
+$('pTo').addEventListener('change', render);
+$('pClear').addEventListener('click', function(){ $('pFrom').value = ''; $('pTo').value = ''; if (state.statusFilter === 'nocover') state.statusFilter = ''; render(); });
+
+$('srvList').addEventListener('input', function(e){
+  var k = e.target.getAttribute('data-k');
+  if (!k) return;
+  var v = e.target.value.replace(/^\s+|\s+$/g, '');
+  if (v) salas[k] = v; else delete salas[k];
+  saveSalas();
+  render();
+});
+
+$('btnCopy').addEventListener('click', function(){ copy(summaryText()); });
+$('btnCsv').addEventListener('click', function(){
+  var blob = new Blob([csvText()], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  var d = new Date();
+  a.href = URL.createObjectURL(blob);
+  a.download = 'kdms_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 500);
+});
+$('btnClear').addEventListener('click', function(){
+  state.kdms = []; state.cpls = {}; state.errors = []; state.open = {}; state.statusFilter = '';
+  render();
+});
+
+/* Tema */
+function applyTheme(t){
+  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+}
+var theme = null;
+try { theme = localStorage.getItem(LS_THEME); } catch(e){}
+applyTheme(theme);
+$('btnTheme').addEventListener('click', function(){
+  var cur = document.documentElement.getAttribute('data-theme');
+  if (!cur) cur = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  var next = cur === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  try { localStorage.setItem(LS_THEME, next); } catch(e){}
+});
+
+/* Refresca los estados cada minuto (por si la pestaña se queda abierta) */
+setInterval(function(){ if (state.kdms.length && !(document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-k'))) render(); }, 60000);
+
+render();
+})();
+</script>
+</body>
+</html>
