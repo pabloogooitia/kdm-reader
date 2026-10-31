@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lector de KDMs</title>
 <!--
-  Babel · Lector de KDMs — v1.0
+  Babel · Lector de KDMs — v1.2
+  v1.2: envía las KDMs a la Lista de Ingestas de la Mostra (Supabase, tabla mostra_peliculas, campo kdm).
   Lee archivos .zip / .xml de KDMs y muestra película, servidor/sala y periodo de validez.
   Todo se procesa en el navegador: los archivos no se suben a ningún sitio.
   Código ES5 sin dependencias. El descompresor deflate es un port de tiny-inflate
@@ -107,13 +108,57 @@ footer{margin-top:26px;font-size:11px;color:var(--muted);text-align:center}
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--accent);color:var(--accent-ink);padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 .hidden{display:none !important}
+.linkbtn{background:none;border:none;padding:0;color:var(--ink);text-decoration:underline;cursor:pointer;font-size:13px}
+.films{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden}
+.films h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin:0;padding:10px 14px;background:var(--panel-2);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.fi{display:flex;align-items:center;gap:14px;padding:10px 14px;border-top:1px solid var(--line);cursor:pointer;flex-wrap:wrap}
+.fi:first-of-type{border-top:none}
+.fi:hover{background:var(--panel-2)}
+.fi.on{background:var(--panel-2);box-shadow:inset 3px 0 0 var(--ink)}
+.fi .fn{flex:1 1 220px;min-width:0}
+.fi .fn b{font-size:15px}
+.fi .fs{font-size:12px;color:var(--muted);margin-top:2px}
+.fi .fd{font-size:13px;white-space:nowrap}
+.fi .fd span{color:var(--muted);font-size:11px;display:block}
+.fi .fb{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;flex:0 1 auto}
+.fi .fb .badge{font-size:11px;padding:2px 8px}
+tr.group{cursor:pointer}
+tr.group .caret{display:inline-block;width:16px;color:var(--muted)}
+tr.group .gcount{font-size:12px;font-weight:500;color:var(--muted);margin-left:8px}
+.filmfilter{font-size:13px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+select{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:6px 8px;border-radius:8px;max-width:100%}
+.srv select{width:150px}
+#mostraPanel .mhead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+#mostraPanel .mstatus{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)} .dot.wait{background:var(--warn)}
+.mcfg{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.mcfg input{flex:1 1 220px}
+.mrow{display:flex;gap:14px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.mrow:first-child{border-top:none}
+.mrow .mchk{padding-top:2px}
+.mrow .mfilm{flex:1 1 260px;min-width:0}
+.mrow .mfilm b{font-size:14px}
+.mrow .mver{font-size:11px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mrow .mver select{font-size:11px;padding:2px 4px}
+.mrow .mval{font-size:12px;min-width:220px}
+.mrow .mval .lbl{color:var(--muted);font-size:11px}
+.mrow .mval .old{color:var(--muted);text-decoration:line-through}
+.salas5{display:inline-flex;gap:3px;margin:2px 0}
+.salas5 span{font-size:11px;font-weight:600;padding:1px 6px;border-radius:5px;background:var(--chip);color:var(--muted)}
+.salas5 span.on{background:var(--ok-bg);color:var(--ok)}
+.salas5 span.new{background:var(--ok);color:var(--panel)}
+.mfoot{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.mfoot label{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.munm{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.munm h3{font-size:12px;margin:0 0 6px;color:var(--warn)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
-      <h1>Lector de KDMs <small>v1.0</small></h1>
+      <h1>Lector de KDMs <small>v1.2</small></h1>
       <div class="sub">Arrastra los .zip o .xml que manda la distribuidora para ver la validez de cada clave.</div>
     </div>
     <div>
@@ -123,8 +168,9 @@ footer{margin-top:26px;font-size:11px;color:var(--muted);text-align:center}
 
   <div id="drop" tabindex="0">
     <strong>Suelta aquí los archivos de KDM</strong>
-    <span>o haz clic para elegirlos · .zip y .xml · puedes cargar varios a la vez</span>
+    <span>o haz clic para elegirlos · .zip y .xml de varias películas a la vez · o <button type="button" class="linkbtn" id="btnDir">elige una carpeta entera</button></span>
     <input id="file" type="file" multiple accept=".zip,.xml,application/zip,text/xml" class="hidden">
+    <input id="dir" type="file" multiple webkitdirectory directory class="hidden">
   </div>
 
   <div id="results" class="hidden">
@@ -142,6 +188,8 @@ footer{margin-top:26px;font-size:11px;color:var(--muted);text-align:center}
       <button id="btnClear">Vaciar</button>
     </div>
     <div class="stats" id="stats"></div>
+    <div class="films" id="films"></div>
+    <div class="filmfilter hidden" id="filmFilter"></div>
     <div class="tablewrap">
       <table>
         <thead>
@@ -158,9 +206,11 @@ footer{margin-top:26px;font-size:11px;color:var(--muted);text-align:center}
       </table>
     </div>
 
+    <div class="panel" id="mostraPanel"></div>
+
     <div class="panel" id="srvPanel">
-      <h2>Nombres de sala</h2>
-      <p>Pon nombre a cada servidor una vez y se recordará en este navegador para las próximas KDMs.</p>
+      <h2>Salas de los servidores</h2>
+      <p>Indica una vez en qué sala está cada servidor y se recordará en este navegador. Hace falta para enviar las KDMs a la Mostra.</p>
       <div id="srvList"></div>
     </div>
   </div>
@@ -496,7 +546,7 @@ function parseCpl(doc, fileName){
    Estado
    ================================================================ */
 var LS_SALAS = 'babel.kdmlector.salas', LS_THEME = 'babel.kdmlector.theme';
-var state = { kdms: [], cpls: {}, errors: [], open: {}, filter: '', statusFilter: '' };
+var state = { kdms: [], cpls: {}, errors: [], open: {}, filter: '', statusFilter: '', film: '', collapsed: {} };
 var salas = {};
 try { salas = JSON.parse(localStorage.getItem(LS_SALAS) || '{}') || {}; } catch(e){ salas = {}; }
 
@@ -574,8 +624,11 @@ function handleBytes(bytes, name, source, depth){
 
 function loadFiles(list){
   var files = [];
-  for (var i = 0; i < list.length; i++) files.push(list[i]);
-  if (!files.length) return;
+  var ignored = 0;
+  for (var i = 0; i < list.length; i++){
+    if (/\.(zip|xml|kdm)$/i.test(list[i].name) && !/^\./.test(list[i].name)) files.push(list[i]); else ignored++;
+  }
+  if (!files.length){ toast(ignored ? 'No hay archivos .zip ni .xml' : 'No se ha seleccionado nada'); return; }
   var before = state.kdms.length;
   var chain = Promise.resolve();
   files.forEach(function(f){
@@ -591,6 +644,9 @@ function loadFiles(list){
     render();
     if (added) toast(added + (added === 1 ? ' KDM cargada' : ' KDMs cargadas'));
     else if (!state.errors.length) toast('No se ha encontrado ninguna KDM nueva');
+    if (added && mostra.url && mostra.key){
+      mostraLoad().then(function(){ if (mostra.auto) mostraSend(true); });
+    }
   });
 }
 
@@ -618,6 +674,7 @@ function getPeriod(){
 }
 
 function matches(k, q){
+  if (state.film && k.parsed.film.toLowerCase() !== state.film) return false;
   if (!q) return true;
   var hay = (k.title + ' ' + k.parsed.film + ' ' + salaName(k) + ' ' + k.server.cn + ' ' + k.file).toLowerCase();
   var parts = q.toLowerCase().split(/\s+/);
@@ -654,12 +711,14 @@ function render(){
 
     if (k.title !== lastTitle){
       lastTitle = k.title;
-      var chips = '';
+      var chips = '', gn = 0;
+      for (var g = 0; g < list.length; g++) if (list[g].title === k.title && matches(list[g], q)) gn++;
       for (var c = 0; c < k.parsed.chips.length; c++) chips += '<span class="chip">' + esc(k.parsed.chips[c]) + '</span>';
-      rows.push('<tr class="group"><td colspan="' + cols + '"><div class="film">' + esc(k.parsed.film) + '</div>' +
+      rows.push('<tr class="group" data-g="' + esc(k.title) + '"><td colspan="' + cols + '"><div class="film"><span class="caret">' + (state.collapsed[k.title] ? '▸' : '▾') + '</span>' + esc(k.parsed.film) + '<span class="gcount">' + gn + ' KDM' + (gn === 1 ? '' : 's') + '</span></div>' +
         (chips ? '<div class="chips">' + chips + '</div>' : '') +
         '<div class="raw">' + esc(k.title) + '</div></td></tr>');
     }
+    if (state.collapsed[k.title]) continue;
     var sala = salaName(k);
     var cc = cplCheck(k), cplHtml;
     if (!cc) cplHtml = '<span class="badge b-none" title="No se ha cargado la CPL de esta KDM">—</span>';
@@ -707,7 +766,9 @@ function render(){
   if (hasPer && counts.nocover) st += stat('nocover', counts.nocover, 'no cubren el periodo');
   $('stats').innerHTML = st;
 
+  renderFilms(now, per);
   renderServers();
+  renderMostra();
 }
 function stat(code, n, label){ return '<span class="stat' + (state.statusFilter === code ? ' on' : '') + '" data-f="' + code + '"><b>' + n + '</b> ' + label + '</span>'; }
 function kv(a, b){ return '<div><span>' + esc(a) + '</span><span>' + esc(b || '—') + '</span></div>'; }
@@ -719,6 +780,75 @@ function keyTypes(keys){
 }
 function fmtDur(s){ var h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return (h ? h + ' h ' : '') + m + ' min'; }
 
+function renderFilms(now, per){
+  var films = {}, order = [], i;
+  for (i = 0; i < state.kdms.length; i++){
+    var k = state.kdms[i], key = k.parsed.film.toLowerCase(), f = films[key];
+    if (!f){ f = films[key] = { name: k.parsed.film, key: key, titles: {}, nt: 0, n: 0, salas: [], from: null, to: null, c: { ok:0, warn:0, wait:0, bad:0, none:0 }, nocover: 0, cplBad: 0 }; order.push(key); }
+    if (!f.titles[k.title]){ f.titles[k.title] = true; f.nt++; }
+    f.n++;
+    var sn = salaName(k) || k.server.device;
+    if (f.salas.indexOf(sn) < 0) f.salas.push(sn);
+    if (k.from && (!f.from || k.from < f.from)) f.from = k.from;
+    if (k.to && (!f.to || k.to > f.to)) f.to = k.to;
+    f.c[statusOf(k, now).code]++;
+    var pe = periodOf(k, per.from, per.to); if (pe && !pe.ok) f.nocover++;
+    var cc = cplCheck(k); if (cc && cc.missing) f.cplBad++;
+  }
+  order.sort(function(a, b){ return a < b ? -1 : a > b ? 1 : 0; });
+  if (state.film && !films[state.film]) state.film = '';
+  var html = '<h2><span>' + order.length + (order.length === 1 ? ' película' : ' películas') + '</span>' +
+    (state.film ? '<button type="button" class="linkbtn" data-film="">Ver todas</button>' : '<span style="text-transform:none;letter-spacing:0;font-weight:400">pulsa una para ver solo esa</span>') + '</h2>';
+  for (i = 0; i < order.length; i++){
+    var F = films[order[i]];
+    F.salas.sort();
+    var b = '';
+    if (F.c.bad) b += '<span class="badge b-bad">' + F.c.bad + ' caducada' + (F.c.bad > 1 ? 's' : '') + '</span>';
+    if (F.nocover) b += '<span class="badge b-bad">' + F.nocover + ' no cubre' + (F.nocover > 1 ? 'n' : '') + ' periodo</span>';
+    if (F.cplBad) b += '<span class="badge b-bad">' + F.cplBad + ' no coincide' + (F.cplBad > 1 ? 'n' : '') + ' con CPL</span>';
+    if (F.c.warn) b += '<span class="badge b-warn">' + F.c.warn + ' caduca' + (F.c.warn > 1 ? 'n' : '') + ' pronto</span>';
+    if (F.c.wait) b += '<span class="badge b-wait">' + F.c.wait + ' aún no válida' + (F.c.wait > 1 ? 's' : '') + '</span>';
+    if (F.c.ok) b += '<span class="badge b-ok">' + F.c.ok + ' válida' + (F.c.ok > 1 ? 's' : '') + '</span>';
+    html += '<div class="fi' + (state.film === F.key ? ' on' : '') + '" data-film="' + esc(F.key) + '">' +
+      '<div class="fn"><b>' + esc(F.name) + '</b><div class="fs">' +
+        F.n + ' KDM' + (F.n === 1 ? '' : 's') + ' · ' + F.nt + (F.nt === 1 ? ' versión' : ' versiones') + ' · ' + esc(F.salas.join(', ')) +
+      '</div></div>' +
+      '<div class="fd"><span>Desde</span>' + (F.from ? fmtShort(F.from) : '—') + '</div>' +
+      '<div class="fd"><span>Hasta</span>' + (F.to ? fmtShort(F.to) : '—') + '</div>' +
+      '<div class="fb">' + b + '</div>' +
+    '</div>';
+  }
+  $('films').innerHTML = html;
+  var ff = $('filmFilter');
+  if (state.film && films[state.film]){
+    ff.className = 'filmfilter';
+    ff.innerHTML = 'Mostrando solo <b>' + esc(films[state.film].name) + '</b> <button type="button" class="linkbtn" data-film="">ver todas</button>';
+  } else { ff.className = 'filmfilter hidden'; ff.innerHTML = ''; }
+}
+
+function filesFromEntries(entries, done){
+  var out = [], pending = 0;
+  function finish(){ if (--pending === 0) done(out); }
+  function walk(entry){
+    pending++;
+    if (entry.isFile){ entry.file(function(f){ out.push(f); finish(); }, finish); }
+    else if (entry.isDirectory){
+      var reader = entry.createReader();
+      var batch = function(){
+        reader.readEntries(function(list){
+          if (!list.length){ finish(); return; }
+          for (var j = 0; j < list.length; j++) walk(list[j]);
+          batch();
+        }, finish);
+      };
+      batch();
+    } else finish();
+  }
+  pending++;
+  for (var i = 0; i < entries.length; i++) walk(entries[i]);
+  finish();
+}
+
 function renderServers(){
   var seen = {}, out = [];
   for (var i = 0; i < state.kdms.length; i++){
@@ -726,12 +856,28 @@ function renderServers(){
     if (seen[s.key]) continue;
     seen[s.key] = true;
     out.push('<div class="srv"><code>' + esc(s.device) + (s.model ? ' · ' + esc(s.model) : '') + '</code>' +
-      '<input type="text" data-k="' + esc(s.key) + '" placeholder="p. ej. Sala 3" value="' + esc(salas[s.key] || '') + '"></div>');
+      salaSelect(s.key) + '</div>');
   }
   var list = $('srvList');
   var active = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute('data-k') : null;
   if (active) return; // no repintar mientras se escribe
   list.innerHTML = out.join('');
+}
+
+function salaSelect(key){
+  var cur = salas[key] || '', o = '<option value="">— sin asignar —</option>', found = !cur;
+  for (var n = 1; n <= 5; n++){
+    var v = 'Sala ' + n;
+    if (cur === v) found = true;
+    o += '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + v + '</option>';
+  }
+  if (!found) o += '<option value="' + esc(cur) + '" selected>' + esc(cur) + '</option>';
+  return '<select data-k="' + esc(key) + '">' + o + '</select>';
+}
+function salaIndex(k){
+  var m = /(\d+)/.exec(salaName(k));
+  var n = m ? +m[1] - 1 : -1;
+  return n >= 0 && n <= 4 ? n : -1;
 }
 
 function renderErrors(){
@@ -809,6 +955,21 @@ var drop = $('drop'), fileInput = $('file');
 drop.addEventListener('click', function(){ fileInput.click(); });
 drop.addEventListener('keydown', function(e){ if (e.keyCode === 13 || e.keyCode === 32){ e.preventDefault(); fileInput.click(); } });
 fileInput.addEventListener('change', function(){ loadFiles(fileInput.files); fileInput.value = ''; });
+var dirInput = $('dir');
+$('btnDir').addEventListener('click', function(e){ e.stopPropagation(); dirInput.click(); });
+dirInput.addEventListener('change', function(){ loadFiles(dirInput.files); dirInput.value = ''; });
+
+function filmClick(e){
+  var el = e.target;
+  while (el && el !== this && !(el.getAttribute && el.getAttribute('data-film') !== null)) el = el.parentNode;
+  if (!el || el === this) return;
+  var f = el.getAttribute('data-film');
+  state.film = (f && state.film !== f) ? f : '';
+  if (state.film){ for (var t in state.collapsed) if (state.collapsed.hasOwnProperty(t)) delete state.collapsed[t]; }
+  render();
+}
+$('films').addEventListener('click', filmClick);
+$('filmFilter').addEventListener('click', filmClick);
 
 var dragDepth = 0;
 document.addEventListener('dragenter', function(e){ e.preventDefault(); dragDepth++; drop.className += ' over'; });
@@ -816,11 +977,26 @@ document.addEventListener('dragleave', function(){ if (--dragDepth <= 0){ dragDe
 document.addEventListener('dragover', function(e){ e.preventDefault(); });
 document.addEventListener('drop', function(e){
   e.preventDefault(); dragDepth = 0; drop.className = drop.className.replace(/\s*over/g, '');
-  if (e.dataTransfer && e.dataTransfer.files) loadFiles(e.dataTransfer.files);
+  var dt = e.dataTransfer; if (!dt) return;
+  var items = dt.items, entries = [];
+  if (items && items.length && items[0].webkitGetAsEntry){
+    for (var i = 0; i < items.length; i++){ var en = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry(); if (en) entries.push(en); }
+  }
+  var hasDir = false;
+  for (var j = 0; j < entries.length; j++) if (entries[j].isDirectory) hasDir = true;
+  if (hasDir) filesFromEntries(entries, loadFiles);
+  else if (dt.files) loadFiles(dt.files);
 });
 
 $('tbody').addEventListener('click', function(e){
   var el = e.target;
+  var gEl = el;
+  while (gEl && gEl !== this && !(gEl.getAttribute && gEl.getAttribute('data-g') !== null)) gEl = gEl.parentNode;
+  if (gEl && gEl !== this){
+    var t = gEl.getAttribute('data-g');
+    state.collapsed[t] = !state.collapsed[t];
+    render(); return;
+  }
   while (el && el !== this && !(el.getAttribute && el.getAttribute('data-i') !== null)) el = el.parentNode;
   if (!el || el === this) return;
   var i = +el.getAttribute('data-i');
@@ -842,14 +1018,17 @@ $('pFrom').addEventListener('change', function(){ if (!$('pTo').value) $('pTo').
 $('pTo').addEventListener('change', render);
 $('pClear').addEventListener('click', function(){ $('pFrom').value = ''; $('pTo').value = ''; if (state.statusFilter === 'nocover') state.statusFilter = ''; render(); });
 
-$('srvList').addEventListener('input', function(e){
+function onSalaChange(e){
   var k = e.target.getAttribute('data-k');
   if (!k) return;
   var v = e.target.value.replace(/^\s+|\s+$/g, '');
+  if ((salas[k] || '') === v) return;
   if (v) salas[k] = v; else delete salas[k];
   saveSalas();
+  if (e.target.blur) e.target.blur();
   render();
-});
+}
+$('srvList').addEventListener('change', onSalaChange);
 
 $('btnCopy').addEventListener('click', function(){ copy(summaryText()); });
 $('btnCsv').addEventListener('click', function(){
@@ -862,9 +1041,299 @@ $('btnCsv').addEventListener('click', function(){
   setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 500);
 });
 $('btnClear').addEventListener('click', function(){
-  state.kdms = []; state.cpls = {}; state.errors = []; state.open = {}; state.statusFilter = '';
+  state.kdms = []; state.cpls = {}; state.errors = []; state.open = {}; state.statusFilter = ''; state.film = ''; state.collapsed = {};
   render();
 });
+
+/* ================================================================
+   Mostra · Lista de Ingestas (Supabase)
+   Lee la tabla mostra_peliculas y rellena el campo "kdm" de cada película:
+   { salas: [S1..S5 true/false], desde: "AAAA-MM-DDTHH:MM", hasta: "…", nota }
+   (el mismo formato que usa la Mostra v2.0, en hora local).
+   Solo se tocan las columnas kdm y enc (enc = 2 → "KDMs"); el resto de la
+   película no se modifica. La Mostra recibe el cambio al momento por Realtime.
+   ================================================================ */
+var MOSTRA_TABLE = 'mostra_peliculas';
+var LS_MOSTRA = 'babel.kdmlector.mostra', LS_MAP = 'babel.kdmlector.mostraMap';
+var mostra = { url: '', key: '', auto: false, rows: null, loading: false, error: '', map: {}, skip: {}, sending: false, cfgOpen: false, lastLoad: null };
+
+function lsGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+function lsSet(k, v){ try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch(e){} }
+
+(function initMostra(){
+  var own = {};
+  try { own = JSON.parse(lsGet(LS_MOSTRA) || '{}') || {}; } catch(e){}
+  // Si no hay credenciales propias, se usan las de la Mostra o las de la Lista
+  // de Ingestas normal (mismo dominio pabloogooitia.github.io → mismo localStorage)
+  mostra.url = own.url || lsGet('mostra_supabase_url') || lsGet('supabase_url') || '';
+  mostra.key = own.key || lsGet('mostra_supabase_key') || lsGet('supabase_key') || '';
+  mostra.auto = !!own.auto;
+  try { mostra.map = JSON.parse(lsGet(LS_MAP) || '{}') || {}; } catch(e){ mostra.map = {}; }
+})();
+function saveMostraCfg(){ lsSet(LS_MOSTRA, JSON.stringify({ url: mostra.url, key: mostra.key, auto: mostra.auto })); }
+function saveMostraMap(){ lsSet(LS_MAP, JSON.stringify(mostra.map)); }
+
+function sb(path, opts){
+  opts = opts || {};
+  var h = { 'apikey': mostra.key, 'Authorization': 'Bearer ' + mostra.key };
+  if (opts.headers) for (var x in opts.headers) if (opts.headers.hasOwnProperty(x)) h[x] = opts.headers[x];
+  return fetch(mostra.url.replace(/\/+$/, '') + '/rest/v1/' + path, { method: opts.method || 'GET', headers: h, body: opts.body })
+    .then(function(r){
+      if (!r.ok){ var e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+      return r.text().then(function(t){ return t ? JSON.parse(t) : null; });
+    });
+}
+function sbErrorText(e){
+  if (!e || !e.status) return 'No se pudo conectar con Supabase (¿sin conexión o URL incorrecta?)';
+  if (e.status === 401 || e.status === 403) return 'Supabase ha rechazado la clave (HTTP ' + e.status + ')';
+  if (e.status === 404) return 'No existe la tabla ' + MOSTRA_TABLE + ' en ese proyecto de Supabase';
+  if (e.status === 400) return 'La tabla ' + MOSTRA_TABLE + ' no tiene el campo kdm: actualiza la Mostra a v2.0 (setup-supabase.sql)';
+  return 'Error de Supabase (HTTP ' + e.status + ')';
+}
+
+function mostraLoad(){
+  if (!mostra.url || !mostra.key) return Promise.resolve();
+  mostra.loading = true; mostra.error = ''; renderMostra();
+  return sb(MOSTRA_TABLE + '?select=row_id,pelicula,enc,kdm,archivos&order=pelicula.asc')
+    .then(function(data){
+      mostra.rows = (data || []).filter(function(r){ return r && (r.pelicula || '').replace(/\s/g, ''); });
+      mostra.lastLoad = new Date();
+    }, function(e){ mostra.error = sbErrorText(e); })
+    .then(function(){ mostra.loading = false; renderMostra(); });
+}
+
+function norm(s){
+  s = String(s || '').toLowerCase();
+  if (s.normalize) s = s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return s.replace(/[^a-z0-9]/g, '');
+}
+function mRow(id){
+  if (!mostra.rows) return null;
+  for (var i = 0; i < mostra.rows.length; i++) if (String(mostra.rows[i].row_id) === String(id)) return mostra.rows[i];
+  return null;
+}
+function archivoNombre(a){ return a && typeof a === 'object' ? (a.nombre || '') : (a || ''); }
+function sameFile(a, b){
+  var x = norm(a), y = norm(b);
+  if (x.length < 6 || y.length < 6) return false;
+  return x === y || x.indexOf(y) >= 0 || y.indexOf(x) >= 0;
+}
+
+// Empareja una versión (título de la CPL) con una película de la Mostra.
+// 1) elegida a mano · 2) uno de sus archivos coincide con la CPL · 3) por el nombre
+function mostraMatch(title, film){
+  if (!mostra.rows) return null;
+  var manual = mostra.map[title];
+  if (manual === 'none') return { id: null, how: 'ninguna' };
+  if (manual && mRow(manual)) return { id: mRow(manual).row_id, how: 'manual' };
+  var byFile = [], byName = [], nf = norm(film), i, j;
+  for (i = 0; i < mostra.rows.length; i++){
+    var r = mostra.rows[i], arch = r.archivos || [];
+    for (j = 0; j < arch.length; j++) if (sameFile(archivoNombre(arch[j]), title)){ byFile.push(r); break; }
+    var np = norm(r.pelicula);
+    if (np.length >= 3 && nf.length >= 3 && (np === nf || (nf.length >= 5 && np.indexOf(nf) === 0) || (np.length >= 5 && nf.indexOf(np) === 0))) byName.push(r);
+  }
+  if (byFile.length === 1) return { id: byFile[0].row_id, how: 'archivo' };
+  if (byName.length === 1) return { id: byName[0].row_id, how: 'nombre' };
+  return null;
+}
+
+function toLocalInput(d){ return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+function fromLocalInput(s){
+  var m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/.exec(s || '');
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : null;
+}
+function kdmLeerMostra(r){
+  var k = r && r.kdm && typeof r.kdm === 'object' ? r.kdm : {};
+  var s = [];
+  for (var i = 0; i < 5; i++) s.push(!!(k.salas && k.salas[i]));
+  return { salas: s, desde: k.desde || '', hasta: k.hasta || '', nota: k.nota || '' };
+}
+
+// Qué se escribiría en cada película de la Mostra
+function mostraPlan(){
+  var res = { entries: [], unmatched: [] };
+  if (!mostra.rows) return res;
+  var titles = {}, order = [], i, t;
+  for (i = 0; i < state.kdms.length; i++){
+    var k = state.kdms[i];
+    if (!titles[k.title]){ titles[k.title] = { title: k.title, film: k.parsed.film, kdms: [] }; order.push(k.title); }
+    titles[k.title].kdms.push(k);
+  }
+  var byRow = {}, rowOrder = [];
+  for (i = 0; i < order.length; i++){
+    t = titles[order[i]];
+    t.match = mostraMatch(t.title, t.film);
+    if (!t.match || !t.match.id){ res.unmatched.push(t); continue; }
+    var id = String(t.match.id);
+    if (!byRow[id]){ byRow[id] = { id: t.match.id, row: mRow(id), titles: [] }; rowOrder.push(id); }
+    byRow[id].titles.push(t);
+  }
+  var now = new Date();
+  for (i = 0; i < rowOrder.length; i++){
+    var e = byRow[rowOrder[i]], r = e.row, old = kdmLeerMostra(r);
+    // Si la película ya tiene un archivo "a proyectar" y coincide con una de
+    // las versiones, solo cuentan las KDMs de esa versión.
+    var proj = null, arch = r.archivos || [];
+    for (var a = 0; a < arch.length; a++) if (arch[a] && arch[a].proyectar) proj = archivoNombre(arch[a]);
+    var use = e.titles;
+    if (proj && e.titles.length > 1){
+      var only = e.titles.filter(function(tt){ return sameFile(proj, tt.title); });
+      if (only.length) { use = only; e.byProj = true; }
+    }
+    var ks = [], sinSala = [];
+    use.forEach(function(tt){ tt.kdms.forEach(function(k){ if (salaIndex(k) >= 0) ks.push(k); else if (sinSala.indexOf(k.server.device) < 0) sinSala.push(k.server.device); }); });
+    e.sinSala = sinSala;
+    if (!ks.length){ e.blocked = 'Asigna la sala de ' + sinSala.join(', '); res.entries.push(e); continue; }
+    var vigentes = ks.filter(function(k){ return k.to && k.to >= now; });
+    if (vigentes.length) ks = vigentes;
+    var salasN = old.salas.slice(), desde = null, hasta = null;
+    ks.forEach(function(k){
+      salasN[salaIndex(k)] = true;
+      if (k.from && (!desde || k.from > desde)) desde = k.from;
+      if (k.to && (!hasta || k.to < hasta)) hasta = k.to;
+    });
+    e.newSalas = ks.map(salaIndex);
+    e.next = { salas: salasN, desde: desde ? toLocalInput(desde) : old.desde, hasta: hasta ? toLocalInput(hasta) : old.hasta, nota: old.nota };
+    e.old = old;
+    e.encChange = (r.enc || 0) !== 2;
+    e.changed = e.encChange || e.next.desde !== old.desde || e.next.hasta !== old.hasta || e.next.salas.join() !== old.salas.join();
+    e.autoOk = e.titles.every(function(tt){ return tt.match.how !== 'ninguna'; });
+    res.entries.push(e);
+  }
+  res.entries.sort(function(x, y){ return (x.row.pelicula || '').toLowerCase() < (y.row.pelicula || '').toLowerCase() ? -1 : 1; });
+  return res;
+}
+
+function salas5(arr, nuevas){
+  var h = '<span class="salas5">';
+  for (var i = 0; i < 5; i++) h += '<span class="' + (arr[i] ? (nuevas && nuevas.indexOf(i) >= 0 ? 'on new' : 'on') : '') + '">S' + (i + 1) + '</span>';
+  return h + '</span>';
+}
+function fmtInput(s){ var d = fromLocalInput(s); return d ? fmtShort(d) : '—'; }
+function mostraOptions(selId){
+  var o = '<option value="">— elegir película de la Mostra —</option><option value="none"' + (selId === 'none' ? ' selected' : '') + '>No es de la Mostra</option>';
+  (mostra.rows || []).forEach(function(r){ o += '<option value="' + esc(r.row_id) + '"' + (String(selId) === String(r.row_id) ? ' selected' : '') + '>' + esc(r.pelicula) + '</option>'; });
+  return o;
+}
+var HOW = { archivo: 'por archivo', nombre: 'por nombre', manual: 'elegida a mano' };
+
+function renderMostra(){
+  var el = $('mostraPanel');
+  if (!el) return;
+  if (document.activeElement && el.contains(document.activeElement) && document.activeElement.type === 'text') return;
+  var h = '<div class="mhead"><h2 style="margin:0">Lista de Ingestas · Mostra</h2><div class="mstatus">';
+  var conf = !!(mostra.url && mostra.key);
+  if (!conf) h += '<span class="dot"></span>Sin conectar';
+  else if (mostra.loading) h += '<span class="dot wait"></span>Cargando…';
+  else if (mostra.error) h += '<span class="dot bad"></span>' + esc(mostra.error);
+  else if (mostra.rows) h += '<span class="dot ok"></span>' + mostra.rows.length + ' películas en la Mostra · ' + fmtTime(mostra.lastLoad);
+  if (conf) h += ' <button type="button" data-m="reload">Recargar</button>';
+  h += ' <button type="button" data-m="cfg">' + (conf ? 'Supabase' : 'Conectar') + '</button></div></div>';
+
+  if (mostra.cfgOpen || !conf){
+    h += '<p>Usa el mismo proyecto de Supabase que la Mostra. En los ordenadores donde ya está configurada la Lista de Ingestas se rellena solo.</p>' +
+      '<div class="mcfg"><input type="text" id="mUrl" placeholder="https://xxxx.supabase.co" value="' + esc(mostra.url) + '">' +
+      '<input type="text" id="mKey" placeholder="Anon key (eyJ…)" value="' + esc(mostra.key) + '">' +
+      '<button type="button" class="primary" data-m="save">Guardar</button></div>';
+  }
+  if (conf && mostra.rows && !mostra.error){
+    var plan = mostraPlan(), n = 0;
+    if (!plan.entries.length && !plan.unmatched.length) h += '<p>Carga KDMs para enviarlas a la Mostra.</p>';
+    else h += '<p>Se rellena la KDM de cada película (salas, desde y hasta) y se marca como <b>KDMs</b>. Si hay varias salas, se guarda el periodo en que valen todas. Solo se tocan esos campos.</p>';
+    h += '<div>';
+    plan.entries.forEach(function(e){
+      var id = String(e.id), checked = e.changed && !e.blocked && !mostra.skip[id];
+      if (checked) n++;
+      var vers = e.titles.map(function(t){
+        return '<span>' + esc(t.title) + ' · ' + (HOW[t.match.how] || '') + '</span><select data-t="' + esc(t.title) + '">' + mostraOptions(t.match.id) + '</select>';
+      }).join('<br>');
+      var val;
+      if (e.blocked) val = '<span class="badge b-warn">' + esc(e.blocked) + '</span><div class="hint">Elige su sala en «Salas de los servidores»</div>';
+      else {
+        val = salas5(e.next.salas, e.newSalas) +
+          '<div><span class="lbl">Desde</span> ' + fmtInput(e.next.desde) + (e.old.desde && e.old.desde !== e.next.desde ? ' <span class="old">' + fmtInput(e.old.desde) + '</span>' : '') + '</div>' +
+          '<div><span class="lbl">Hasta</span> ' + fmtInput(e.next.hasta) + (e.old.hasta && e.old.hasta !== e.next.hasta ? ' <span class="old">' + fmtInput(e.old.hasta) + '</span>' : '') + '</div>' +
+          (e.sinSala.length ? '<div class="hint">Sin sala asignada: ' + esc(e.sinSala.join(', ')) + '</div>' : '');
+      }
+      var badge = e.blocked ? '' : e.changed ? '<span class="badge b-wait">Se actualizará</span>' : '<span class="badge b-ok">Ya está al día</span>';
+      h += '<div class="mrow"><div class="mchk"><input type="checkbox" data-c="' + esc(id) + '"' + (checked ? ' checked' : '') + (!e.changed || e.blocked ? ' disabled' : '') + '></div>' +
+        '<div class="mfilm"><b>' + esc(e.row.pelicula) + '</b> ' + badge +
+          (e.byProj ? '<div class="hint">Solo la versión marcada «a proyectar» en la Mostra</div>' : '') +
+          '<div class="mver">' + vers + '</div></div>' +
+        '<div class="mval">' + val + '</div></div>';
+    });
+    h += '</div>';
+    if (plan.unmatched.length){
+      h += '<div class="munm"><h3>Sin película de la Mostra (' + plan.unmatched.length + ')</h3>';
+      plan.unmatched.forEach(function(t){
+        h += '<div class="mver" style="margin:4px 0"><span><b>' + esc(t.film) + '</b> · ' + esc(t.title) + '</span><select data-t="' + esc(t.title) + '">' + mostraOptions(t.match ? t.match.id || 'none' : '') + '</select></div>';
+      });
+      h += '</div>';
+    }
+    h += '<div class="mfoot"><label><input type="checkbox" data-m="auto"' + (mostra.auto ? ' checked' : '') + '> Enviar automáticamente al cargar KDMs</label>' +
+      '<button type="button" class="primary" data-m="send"' + (n && !mostra.sending ? '' : ' disabled') + '>' +
+      (mostra.sending ? 'Enviando…' : 'Enviar ' + n + (n === 1 ? ' película' : ' películas') + ' a la Mostra') + '</button></div>';
+  }
+  el.innerHTML = h;
+}
+
+function mostraSend(auto){
+  if (mostra.sending) return;
+  mostra.sending = true; renderMostra();
+  var hechos = 0, fallo = null;
+  // Se relee la tabla justo antes para no pisar cambios hechos desde la Mostra
+  mostraLoad().then(function(){
+    if (mostra.error) throw { status: 0, msg: mostra.error };
+    var plan = mostraPlan().entries.filter(function(e){
+      return e.changed && !e.blocked && (auto ? e.autoOk : !mostra.skip[String(e.id)]);
+    });
+    var chain = Promise.resolve();
+    plan.forEach(function(e){
+      chain = chain.then(function(){
+        if (fallo) return;
+        return sb(MOSTRA_TABLE + '?row_id=eq.' + encodeURIComponent(e.id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ kdm: e.next, enc: 2 })
+        }).then(function(){ hechos++; }, function(err){ fallo = err; });
+      });
+    });
+    return chain;
+  }).then(null, function(err){ fallo = err; }).then(function(){
+    mostra.sending = false;
+    if (fallo) toast(fallo.msg || sbErrorText(fallo));
+    else if (hechos) toast(hechos + (hechos === 1 ? ' película actualizada' : ' películas actualizadas') + ' en la Mostra');
+    else if (!auto) toast('No había nada que actualizar');
+    return mostraLoad();
+  });
+}
+
+$('mostraPanel').addEventListener('click', function(e){
+  var m = e.target.getAttribute && e.target.getAttribute('data-m');
+  if (m === 'cfg'){ mostra.cfgOpen = !mostra.cfgOpen; renderMostra(); }
+  else if (m === 'reload') mostraLoad();
+  else if (m === 'save'){
+    mostra.url = $('mUrl').value.replace(/^\s+|\s+$/g, '');
+    mostra.key = $('mKey').value.replace(/^\s+|\s+$/g, '');
+    saveMostraCfg(); mostra.cfgOpen = false; mostra.rows = null;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    mostraLoad();
+  }
+  else if (m === 'send') mostraSend(false);
+});
+$('mostraPanel').addEventListener('change', function(e){
+  var t = e.target;
+  if (t.getAttribute('data-m') === 'auto'){ mostra.auto = t.checked; saveMostraCfg(); return; }
+  var c = t.getAttribute('data-c');
+  if (c !== null){ if (t.checked) delete mostra.skip[c]; else mostra.skip[c] = true; renderMostra(); return; }
+  var title = t.getAttribute('data-t');
+  if (title !== null){
+    if (t.value) mostra.map[title] = t.value; else delete mostra.map[title];
+    saveMostraMap(); renderMostra();
+  }
+});
+if (mostra.url && mostra.key) mostraLoad();
 
 /* Tema */
 function applyTheme(t){
