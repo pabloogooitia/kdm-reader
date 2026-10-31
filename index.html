@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lector de KDMs</title>
 <!--
-  Babel · Lector de KDMs — v1.3
+  Babel · Lector de KDMs — v1.4
+  v1.4: lee DCPs (carpeta, disco o CPL suelta) y dice si están encriptados.
   v1.3: se envía a la Mostra aunque no se sepa la sala de algún servidor.
   v1.2: envía las KDMs a la Lista de Ingestas de la Mostra (Supabase, tabla mostra_peliculas, campo kdm).
   Lee archivos .zip / .xml de KDMs y muestra película, servidor/sala y periodo de validez.
@@ -153,14 +154,36 @@ select{font:inherit;font-size:13px;border:1px solid var(--line);background:var(-
 .mfoot label{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
 .munm{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 .munm h3{font-size:12px;margin:0 0 6px;color:var(--warn)}
+.sectitle{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:4px 0 10px}
+.sectitle h2{font-size:18px;margin:0}
+.sectitle .sum{font-size:13px;color:var(--muted)}
+.sectitle .sum b{color:var(--ink)}
+.dcps{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:22px}
+.dcp{flex:1 1 340px;max-width:100%;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.dcp .dtop{padding:12px 16px;display:flex;align-items:center;gap:12px}
+.dcp.enc .dtop{background:var(--bad-bg);color:var(--bad)}
+.dcp.free .dtop{background:var(--ok-bg);color:var(--ok)}
+.dcp .dicon{font-size:24px;line-height:1;width:28px;text-align:center}
+.dcp .dverdict{font-size:17px;font-weight:800;letter-spacing:-.01em}
+.dcp .dwhy{font-size:12px;opacity:.85}
+.dcp .dbody{padding:12px 16px 14px;flex:1}
+.dcp .dfilm{font-size:18px;font-weight:700;line-height:1.25}
+.dcp .dkind{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.dcp .dfacts{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;margin-top:8px}
+.dcp .dfacts span{white-space:nowrap}
+.dcp .dfacts span i{font-style:normal;color:var(--muted);font-size:11px;margin-right:3px}
+.dcp .dkdm{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:13px}
+.dcp .dkdm .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin-bottom:4px}
+.dcp .dkdm .kline{display:flex;justify-content:space-between;gap:8px;padding:2px 0;align-items:center}
+.dcp .dfoot{padding:8px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);word-break:break-all;background:var(--panel-2)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
-      <h1>Lector de KDMs <small>v1.3</small></h1>
-      <div class="sub">Arrastra los .zip o .xml que manda la distribuidora para ver la validez de cada clave.</div>
+      <h1>Lector de KDMs <small>v1.4</small></h1>
+      <div class="sub">Arrastra las KDMs (.zip o .xml) para ver su validez, o la carpeta de un DCP para saber si está encriptado.</div>
     </div>
     <div>
       <button id="btnTheme" title="Cambiar entre modo claro y oscuro">Claro / oscuro</button>
@@ -168,8 +191,8 @@ select{font:inherit;font-size:13px;border:1px solid var(--line);background:var(-
   </header>
 
   <div id="drop" tabindex="0">
-    <strong>Suelta aquí los archivos de KDM</strong>
-    <span>o haz clic para elegirlos · .zip y .xml de varias películas a la vez · o <button type="button" class="linkbtn" id="btnDir">elige una carpeta entera</button></span>
+    <strong>Suelta aquí KDMs o carpetas de DCP</strong>
+    <span>o haz clic para elegir archivos (.zip, .xml) · o <button type="button" class="linkbtn" id="btnDir">elige una carpeta</button> (un DCP, varios o el disco entero)</span>
     <input id="file" type="file" multiple accept=".zip,.xml,application/zip,text/xml" class="hidden">
     <input id="dir" type="file" multiple webkitdirectory directory class="hidden">
   </div>
@@ -188,6 +211,8 @@ select{font:inherit;font-size:13px;border:1px solid var(--line);background:var(-
       <button id="btnCsv">CSV</button>
       <button id="btnClear">Vaciar</button>
     </div>
+    <div id="dcpPanel" class="hidden"></div>
+    <div id="kdmZone">
     <div class="stats" id="stats"></div>
     <div class="films" id="films"></div>
     <div class="filmfilter hidden" id="filmFilter"></div>
@@ -207,6 +232,7 @@ select{font:inherit;font-size:13px;border:1px solid var(--line);background:var(-
       </table>
     </div>
 
+    </div>
     <div class="panel" id="mostraPanel"></div>
 
     <div class="panel" id="srvPanel">
@@ -520,26 +546,59 @@ function parseKdm(doc, fileName, source){
   return k;
 }
 
-function parseCpl(doc, fileName){
+var KIND_ES = { feature:'Largometraje', trailer:'Tráiler', teaser:'Teaser', advertisement:'Publicidad', short:'Cortometraje', rating:'Calificación', policy:'Aviso', psa:'Anuncio', test:'Prueba', transitional:'Transición', episode:'Episodio', promo:'Promo' };
+function parseCpl(doc, fileName, path, source){
   var root = doc.documentElement;
-  var keyEls = tags(root, 'KeyId'), keys = {};
-  for (var i = 0; i < keyEls.length; i++) keys[normUuid(keyEls[i].textContent)] = true;
-  var frames = 0, rate = 0, pics = tags(root, 'MainPicture');
-  if (!pics.length) pics = tags(root, 'MainStereoscopicPicture');
+  var keyEls = tags(root, 'KeyId'), keys = {}, nKeys = 0;
+  for (var i = 0; i < keyEls.length; i++){ var kid = normUuid(keyEls[i].textContent); if (kid && !keys[kid]){ keys[kid] = true; nKeys++; } }
+  var stereo = tags(root, 'MainStereoscopicPicture').length > 0;
+  var pics = stereo ? tags(root, 'MainStereoscopicPicture') : tags(root, 'MainPicture');
+  var frames = 0, rate = 0, ratio = '';
   for (var j = 0; j < pics.length; j++){
     var dur = +txt(pics[j], 'Duration') || +txt(pics[j], 'IntrinsicDuration') || 0;
     var er = (txt(pics[j], 'EditRate') || '24 1').split(/\s+/);
     var r = (+er[0] || 24) / (+er[1] || 1);
-    frames += dur / r; rate = r;
+    frames += dur / r;
+    var fr = (txt(pics[j], 'FrameRate') || '').split(/\s+/);
+    rate = fr[0] ? (+fr[0]) / (+fr[1] || 1) : r;
+    if (!ratio) ratio = txt(pics[j], 'ScreenAspectRatio');
   }
+  // Qué pistas van encriptadas
+  function encTrack(name){ var l = tags(root, name); for (var x = 0; x < l.length; x++) if (txt(l[x], 'KeyId')) return true; return false; }
+  var encPic = encTrack(stereo ? 'MainStereoscopicPicture' : 'MainPicture'), encSnd = encTrack('MainSound'), encSub = encTrack('MainSubtitle');
+  // Formato de imagen a partir de ScreenAspectRatio ("2048 858" en SMPTE, "2.39" en Interop)
+  var res = '', aspect = '', rp = ratio.split(/\s+/);
+  if (rp.length === 2){
+    var w = +rp[0], h = +rp[1], a = w / h;
+    res = w >= 3000 ? '4K' : w >= 1000 ? '2K' : '';
+    aspect = a > 2.2 ? 'Scope' : a > 1.88 ? 'Full' : a > 1.7 ? 'Flat' : a.toFixed(2);
+  } else if (rp[0]) { var a2 = parseFloat(rp[0].replace(',', '.')); aspect = a2 > 2.2 ? 'Scope' : a2 > 1.88 ? 'Full' : a2 > 1.7 ? 'Flat' : rp[0]; }
+  var subs = [], sl = tags(root, 'MainSubtitle');
+  for (var k = 0; k < sl.length; k++){ var lg = txt(sl[k], 'Language'); if (lg && subs.indexOf(lg.toUpperCase()) < 0) subs.push(lg.toUpperCase()); }
+  var snd = txt(root, 'MainSoundConfiguration').split('/')[0];
+  var soundCfg = /^51/.test(snd) ? '5.1' : /^71/.test(snd) ? '7.1' : /^(20|ST)/.test(snd) ? '2.0' : snd;
+  var atmos = tags(root, 'AuxData').length > 0 || /atmos|iab/i.test(txt(root, 'ExtensionMetadataList'));
+  var title = txt(root, 'ContentTitleText');
+  var folder = '';
+  if (path){ var pp = path.replace(/^\/+/, '').split('/'); pp.pop(); folder = pp.join('/'); }
   return {
-    kind: 'cpl', file: fileName,
+    kind: 'cpl', file: fileName, path: path || '', folder: folder, source: source || '',
+    fromDcp: !source,
     id: normUuid(txt(root, 'Id')),
-    title: txt(root, 'ContentTitleText'),
-    encrypted: Object.keys(keys).length > 0,
+    title: title,
+    parsed: parseTitle(title),
+    contentKind: (txt(root, 'ContentKind') || '').toLowerCase(),
+    encrypted: nKeys > 0, nKeys: nKeys, encPic: encPic, encSnd: encSnd, encSub: encSub,
     keys: keys,
     seconds: Math.round(frames),
-    issuer: txt(root, 'Issuer')
+    reels: tags(root, 'Reel').length,
+    fps: rate ? Math.round(rate * 100) / 100 : 0,
+    res: res, aspect: aspect, stereo: stereo,
+    subs: subs, sound: soundCfg, atmos: atmos,
+    issuer: txt(root, 'Issuer'),
+    creator: txt(root, 'Creator'),
+    issueDate: parseIso(txt(root, 'IssueDate')),
+    interop: /digicine|PROTO-ASDCP/i.test(root.namespaceURI || '')
   };
 }
 
@@ -595,7 +654,7 @@ function readFile(file){
 
 function isZip(b){ return b.length > 4 && b[0] === 0x50 && b[1] === 0x4b && (b[2] === 0x03 || b[2] === 0x05); }
 
-function handleBytes(bytes, name, source, depth){
+function handleBytes(bytes, name, source, depth, path){
   if (isZip(bytes)){
     if (depth > 3) return;
     var entries = readZip(bytes);
@@ -618,8 +677,12 @@ function handleBytes(bytes, name, source, depth){
     for (var j = 0; j < state.kdms.length; j++){ if (k.messageId && state.kdms[j].messageId === k.messageId) return; }
     state.kdms.push(k);
   } else if (rootName === 'CompositionPlaylist'){
-    var c = parseCpl(doc, name);
-    if (c.id) state.cpls[c.id] = c;
+    var c = parseCpl(doc, name, path, source);
+    if (!c.id) return;
+    var prev = state.cpls[c.id];
+    // Si ya estaba cargado desde un DCP, no se sustituye por la copia que viene con la KDM
+    if (prev && prev.fromDcp && !c.fromDcp) return;
+    state.cpls[c.id] = c;
   }
 }
 
@@ -630,22 +693,24 @@ function loadFiles(list){
     if (/\.(zip|xml|kdm)$/i.test(list[i].name) && !/^\./.test(list[i].name)) files.push(list[i]); else ignored++;
   }
   if (!files.length){ toast(ignored ? 'No hay archivos .zip ni .xml' : 'No se ha seleccionado nada'); return; }
-  var before = state.kdms.length;
+  var before = state.kdms.length, beforeDcp = dcpList().length;
   var chain = Promise.resolve();
   files.forEach(function(f){
     chain = chain.then(function(){
       return readFile(f).then(function(b){
-        try { handleBytes(b, f.name, '', 0); }
+        try { handleBytes(b, f.name, '', 0, f._path || f.webkitRelativePath || ''); }
         catch(err){ state.errors.push(f.name + ': ' + err.message); }
       }, function(err){ state.errors.push(f.name + ': ' + err.message); });
     });
   });
   chain.then(function(){
-    var added = state.kdms.length - before;
+    var added = state.kdms.length - before, addedDcp = dcpList().length - beforeDcp, msg = [];
     render();
-    if (added) toast(added + (added === 1 ? ' KDM cargada' : ' KDMs cargadas'));
-    else if (!state.errors.length) toast('No se ha encontrado ninguna KDM nueva');
-    if (added && mostra.url && mostra.key){
+    if (addedDcp) msg.push(addedDcp + (addedDcp === 1 ? ' DCP' : ' DCPs'));
+    if (added) msg.push(added + (added === 1 ? ' KDM' : ' KDMs'));
+    if (msg.length) toast('Cargado: ' + msg.join(' y '));
+    else if (!state.errors.length) toast('No se ha encontrado ninguna KDM ni DCP nuevo');
+    if ((added || addedDcp) && mostra.url && mostra.key){
       mostraLoad().then(function(){ if (mostra.auto) mostraSend(true); });
     }
   });
@@ -689,11 +754,16 @@ function dateCell(d, raw){
 }
 
 function render(){
-  var has = state.kdms.length > 0;
+  var hasK = state.kdms.length > 0, hasD = dcpList().length > 0, has = hasK || hasD;
   $('results').className = has ? '' : 'hidden';
   $('drop').className = has ? 'compact' : '';
   renderErrors();
   if (!has) return;
+  renderDcps();
+  $('kdmZone').className = hasK ? '' : 'hidden';
+  $('srvPanel').className = hasK ? 'panel' : 'panel hidden';
+  $('pFrom').parentNode.style.display = hasK ? '' : 'none';
+  if (!hasK){ renderMostra(); return; }
 
   var now = new Date(), per = getPeriod(), hasPer = !!(per.from || per.to);
   var q = state.filter, list = sorted(), rows = [], counts = { ok:0, warn:0, wait:0, bad:0, none:0, nocover:0 };
@@ -832,7 +902,7 @@ function filesFromEntries(entries, done){
   function finish(){ if (--pending === 0) done(out); }
   function walk(entry){
     pending++;
-    if (entry.isFile){ entry.file(function(f){ out.push(f); finish(); }, finish); }
+    if (entry.isFile){ entry.file(function(f){ try { f._path = entry.fullPath; } catch(e){} out.push(f); finish(); }, finish); }
     else if (entry.isDirectory){
       var reader = entry.createReader();
       var batch = function(){
@@ -850,7 +920,87 @@ function filesFromEntries(entries, done){
   finish();
 }
 
+/* ================================================================
+   DCPs
+   ================================================================ */
+function dcpList(){
+  var out = [];
+  for (var id in state.cpls) if (state.cpls.hasOwnProperty(id) && state.cpls[id].fromDcp) out.push(state.cpls[id]);
+  out.sort(function(a, b){
+    if (a.encrypted !== b.encrypted) return a.encrypted ? -1 : 1;
+    var x = a.parsed.film.toLowerCase(), y = b.parsed.film.toLowerCase();
+    return x < y ? -1 : x > y ? 1 : (a.title < b.title ? -1 : 1);
+  });
+  return out;
+}
+function kdmsForCpl(c){ return state.kdms.filter(function(k){ return k.cplId === c.id; }); }
+
+function renderDcps(){
+  var list = dcpList(), el = $('dcpPanel'), q = (state.filter || '').toLowerCase();
+  if (!list.length){ el.className = 'hidden'; el.innerHTML = ''; return; }
+  el.className = '';
+  var nEnc = 0, now = new Date(), cards = [];
+  list.forEach(function(c){
+    if (c.encrypted) nEnc++;
+    if (q && (c.title + ' ' + c.parsed.film + ' ' + c.folder).toLowerCase().indexOf(q) < 0) return;
+    var p = c.parsed, facts = [];
+    if (c.seconds) facts.push('<span><i>Duración</i>' + fmtDur(c.seconds) + '</span>');
+    var fmt = [c.res || '', c.aspect || '', c.stereo ? '3D' : ''].filter(Boolean).join(' · ');
+    if (fmt) facts.push('<span><i>Imagen</i>' + esc(fmt) + '</span>');
+    if (c.fps) facts.push('<span><i>Fps</i>' + c.fps + '</span>');
+    var snd = (c.sound || '') + (c.atmos ? ' + Atmos' : '');
+    if (snd) facts.push('<span><i>Sonido</i>' + esc(snd) + '</span>');
+    facts.push('<span><i>Subtítulos</i>' + (c.subs.length ? esc(c.subs.join(', ')) : 'no') + '</span>');
+    if (c.reels) facts.push('<span><i>Bobinas</i>' + c.reels + '</span>');
+    facts.push('<span><i>Formato</i>' + (c.interop ? 'Interop' : 'SMPTE') + '</span>');
+    var chips = '';
+    p.chips.forEach(function(x){ chips += '<span class="chip">' + esc(x) + '</span>'; });
+
+    var top, kdmHtml = '';
+    if (c.encrypted){
+      var what = [c.encPic ? 'imagen' : '', c.encSnd ? 'sonido' : '', c.encSub ? 'subtítulos' : ''].filter(Boolean);
+      var whatTxt = what.length > 1 ? what.slice(0, -1).join(', ') + ' y ' + what[what.length - 1] : what.join('');
+      top = '<div class="dtop"><div class="dicon">🔒</div><div><div class="dverdict">Encriptado · necesita KDM</div>' +
+        '<div class="dwhy">' + c.nKeys + (c.nKeys === 1 ? ' clave' : ' claves') + (whatTxt ? ' · ' + whatTxt : '') + '</div></div></div>';
+      var ks = kdmsForCpl(c);
+      if (!ks.length){
+        kdmHtml = '<div class="dkdm"><div class="lbl">KDMs</div><span class="badge b-warn">Ninguna KDM cargada para este DCP</span>' +
+          '<div class="hint" style="white-space:normal">Arrastra aquí sus KDMs para comprobar que son de esta versión.</div></div>';
+      } else {
+        ks.sort(function(a, b){ var x = salaName(a) || 'zz' + a.server.device, y = salaName(b) || 'zz' + b.server.device; return x < y ? -1 : 1; });
+        kdmHtml = '<div class="dkdm"><div class="lbl">' + ks.length + (ks.length === 1 ? ' KDM cargada' : ' KDMs cargadas') + '</div>';
+        ks.forEach(function(k){
+          var st = statusOf(k, now);
+          kdmHtml += '<div class="kline"><span><b>' + esc(salaName(k) || k.server.device) + '</b> <span class="dev">' + (k.to ? 'hasta ' + fmtShort(k.to) : '') + '</span></span>' +
+            '<span class="badge ' + st.cls + '">' + st.label + '</span></div>';
+        });
+        kdmHtml += '</div>';
+      }
+    } else {
+      top = '<div class="dtop"><div class="dicon">✓</div><div><div class="dverdict">Libre · no necesita KDM</div><div class="dwhy">Ninguna pista encriptada</div></div></div>';
+    }
+    cards.push('<div class="dcp ' + (c.encrypted ? 'enc' : 'free') + '">' + top +
+      '<div class="dbody">' +
+        (KIND_ES[c.contentKind] ? '<div class="dkind">' + KIND_ES[c.contentKind] + '</div>' : '') +
+        '<div class="dfilm">' + esc(p.film) + '</div>' +
+        (chips ? '<div class="chips">' + chips + '</div>' : '') +
+        '<div class="dfacts">' + facts.join('') + '</div>' +
+        kdmHtml +
+      '</div>' +
+      '<div class="dfoot">' + esc(c.title) + (c.folder ? '<br>Carpeta: ' + esc(c.folder) : '') +
+        (c.issuer ? '<br>' + esc(c.issuer) + (c.issueDate ? ' · ' + fmtDay(c.issueDate) : '') : '') + '</div>' +
+    '</div>');
+  });
+  var nFree = list.length - nEnc;
+  el.innerHTML = '<div class="sectitle"><h2>DCPs</h2><div class="sum"><b>' + list.length + '</b> ' + (list.length === 1 ? 'DCP' : 'DCPs') +
+    (nEnc ? ' · <b style="color:var(--bad)">' + nEnc + '</b> ' + (nEnc === 1 ? 'necesita' : 'necesitan') + ' KDM' : '') +
+    (nFree ? ' · <b style="color:var(--ok)">' + nFree + '</b> ' + (nFree === 1 ? 'libre' : 'libres') : '') + '</div></div>' +
+    '<div class="dcps">' + (cards.length ? cards.join('') : '<div class="empty">Ningún DCP coincide con la búsqueda.</div>') + '</div>' +
+    (state.kdms.length ? '<div class="sectitle"><h2>KDMs</h2></div>' : '');
+}
+
 function renderServers(){
+
   var seen = {}, out = [];
   for (var i = 0; i < state.kdms.length; i++){
     var s = state.kdms[i].server;
@@ -1158,9 +1308,14 @@ function mostraPlan(){
   var titles = {}, order = [], i, t;
   for (i = 0; i < state.kdms.length; i++){
     var k = state.kdms[i];
-    if (!titles[k.title]){ titles[k.title] = { title: k.title, film: k.parsed.film, kdms: [] }; order.push(k.title); }
+    if (!titles[k.title]){ titles[k.title] = { title: k.title, film: k.parsed.film, kdms: [], cpls: [] }; order.push(k.title); }
     titles[k.title].kdms.push(k);
   }
+  dcpList().forEach(function(c){
+    if (!c.title) return;
+    if (!titles[c.title]){ titles[c.title] = { title: c.title, film: c.parsed.film, kdms: [], cpls: [] }; order.push(c.title); }
+    titles[c.title].cpls.push(c);
+  });
   var byRow = {}, rowOrder = [];
   for (i = 0; i < order.length; i++){
     t = titles[order[i]];
@@ -1182,35 +1337,47 @@ function mostraPlan(){
       var only = e.titles.filter(function(tt){ return sameFile(proj, tt.title); });
       if (only.length) { use = only; e.byProj = true; }
     }
-    // Se envía aunque falte la sala de algún servidor: las fechas y la marca
-    // de KDMs siempre; las salas conocidas se marcan; si hay KDMs para los 5
-    // servidores (todas las salas del Babel) se marcan todas; las que no se
-    // saben se apuntan en la nota para marcarlas a mano en la Mostra.
     var ks = [];
     use.forEach(function(tt){ tt.kdms.forEach(function(k){ ks.push(k); }); });
-    var vigentes = ks.filter(function(k){ return k.to && k.to >= now; });
-    if (vigentes.length) ks = vigentes;
-    var salasN = old.salas.slice(), desde = null, hasta = null, devs = {}, nDevs = 0, sinSala = [], nuevas = [];
-    ks.forEach(function(k){
-      if (!devs[k.server.key]){ devs[k.server.key] = true; nDevs++; }
-      var si = salaIndex(k);
-      if (si >= 0){ salasN[si] = true; nuevas.push(si); }
-      else if (sinSala.indexOf(k.server.device) < 0) sinSala.push(k.server.device);
-      if (k.from && (!desde || k.from > desde)) desde = k.from;
-      if (k.to && (!hasta || k.to < hasta)) hasta = k.to;
-    });
-    e.todas = nDevs >= 5 && sinSala.length > 0;
-    if (nDevs >= 5) for (var si5 = 0; si5 < 5; si5++){ salasN[si5] = true; nuevas.push(si5); }
-    e.sinSala = e.todas ? [] : sinSala;
-    e.newSalas = nuevas;
-    var notaBase = String(old.nota || '').replace(/\s*(·\s*)?Lector KDM:[^·]*/g, '').replace(/^\s*·\s*|\s*·\s*$/g, '');
-    var extra = e.sinSala.length ? 'Lector KDM: falta la sala de ' + e.sinSala.join(', ') : '';
-    e.next = { salas: salasN, desde: desde ? toLocalInput(desde) : old.desde, hasta: hasta ? toLocalInput(hasta) : old.hasta,
-      nota: notaBase && extra ? notaBase + ' · ' + extra : (notaBase || extra) };
-    e.sinNinguna = !salasN.some(Boolean);
+    var cps = [];
+    use.forEach(function(tt){ tt.cpls.forEach(function(c){ cps.push(c); }); });
     e.old = old;
-    e.encChange = (r.enc || 0) !== 2;
-    e.changed = e.encChange || e.next.desde !== old.desde || e.next.hasta !== old.hasta || e.next.salas.join() !== old.salas.join() || e.next.nota !== old.nota;
+    e.encOld = r.enc || 0;
+    e.dcpEnc = cps.length ? cps.some(function(c){ return c.encrypted; }) : null;
+    e.encNext = (ks.length || e.dcpEnc) ? 2 : (e.dcpEnc === false ? 1 : e.encOld);
+    e.encChange = e.encNext !== e.encOld;
+    e.sinSala = []; e.newSalas = [];
+    if (ks.length){
+      // Se envía aunque falte la sala de algún servidor: las fechas y la marca
+      // de KDMs siempre; las salas conocidas se marcan; si hay KDMs para los 5
+      // servidores (todas las salas del Babel) se marcan todas; las que no se
+      // saben se apuntan en la nota para marcarlas a mano en la Mostra.
+      var vigentes = ks.filter(function(k){ return k.to && k.to >= now; });
+      if (vigentes.length) ks = vigentes;
+      var salasN = old.salas.slice(), desde = null, hasta = null, devs = {}, nDevs = 0, sinSala = [], nuevas = [];
+      ks.forEach(function(k){
+        if (!devs[k.server.key]){ devs[k.server.key] = true; nDevs++; }
+        var si = salaIndex(k);
+        if (si >= 0){ salasN[si] = true; nuevas.push(si); }
+        else if (sinSala.indexOf(k.server.device) < 0) sinSala.push(k.server.device);
+        if (k.from && (!desde || k.from > desde)) desde = k.from;
+        if (k.to && (!hasta || k.to < hasta)) hasta = k.to;
+      });
+      e.todas = nDevs >= 5 && sinSala.length > 0;
+      if (nDevs >= 5) for (var si5 = 0; si5 < 5; si5++){ salasN[si5] = true; nuevas.push(si5); }
+      e.sinSala = e.todas ? [] : sinSala;
+      e.newSalas = nuevas;
+      var notaBase = String(old.nota || '').replace(/\s*(·\s*)?Lector KDM:[^·]*/g, '').replace(/^\s*·\s*|\s*·\s*$/g, '');
+      var extra = e.sinSala.length ? 'Lector KDM: falta la sala de ' + e.sinSala.join(', ') : '';
+      e.next = { salas: salasN, desde: desde ? toLocalInput(desde) : old.desde, hasta: hasta ? toLocalInput(hasta) : old.hasta,
+        nota: notaBase && extra ? notaBase + ' · ' + extra : (notaBase || extra) };
+      e.sinNinguna = !salasN.some(Boolean);
+      e.changed = e.encChange || e.next.desde !== old.desde || e.next.hasta !== old.hasta || e.next.salas.join() !== old.salas.join() || e.next.nota !== old.nota;
+    } else {
+      // Solo DCP: se marca la encriptación (LIBRE o KDMs) y la KDM no se toca
+      e.next = null;
+      e.changed = e.encChange;
+    }
     e.autoOk = e.titles.every(function(tt){ return tt.match.how !== 'ninguna'; });
     res.entries.push(e);
   }
@@ -1253,7 +1420,7 @@ function renderMostra(){
   if (conf && mostra.rows && !mostra.error){
     var plan = mostraPlan(), n = 0;
     if (!plan.entries.length && !plan.unmatched.length) h += '<p>Carga KDMs para enviarlas a la Mostra.</p>';
-    else h += '<p>Se rellena la KDM de cada película (salas, desde y hasta) y se marca como <b>KDMs</b>. Si hay varias salas, se guarda el periodo en que valen todas. Solo se tocan esos campos.</p>';
+    else h += '<p>Con los DCPs se marca la encriptación de cada película (<b>LIBRE</b> o <b>KDMs</b>); con las KDMs se rellenan además las salas, desde y hasta (si hay varias salas, el periodo en que valen todas). Solo se tocan esos campos.</p>';
     h += '<div>';
     plan.entries.forEach(function(e){
       var id = String(e.id), checked = e.changed && !e.blocked && !mostra.skip[id];
@@ -1261,9 +1428,13 @@ function renderMostra(){
       var vers = e.titles.map(function(t){
         return '<span>' + esc(t.title) + ' · ' + (HOW[t.match.how] || '') + '</span><select data-t="' + esc(t.title) + '">' + mostraOptions(t.match.id) + '</select>';
       }).join('<br>');
+      var ENC = ['sin indicar', 'LIBRE', 'KDMs'];
+      var encLine = '<div><span class="lbl">Encriptación</span> <b>' + ENC[e.encNext] + '</b>' + (e.encChange ? ' <span class="old">' + ENC[e.encOld] + '</span>' : '') +
+        (e.dcpEnc !== null ? ' <span class="hint">(según el DCP)</span>' : '') + '</div>';
       var val;
-      {
-        val = salas5(e.next.salas, e.newSalas) +
+      if (!e.next) val = encLine;
+      else {
+        val = encLine + salas5(e.next.salas, e.newSalas) +
           '<div><span class="lbl">Desde</span> ' + fmtInput(e.next.desde) + (e.old.desde && e.old.desde !== e.next.desde ? ' <span class="old">' + fmtInput(e.old.desde) + '</span>' : '') + '</div>' +
           '<div><span class="lbl">Hasta</span> ' + fmtInput(e.next.hasta) + (e.old.hasta && e.old.hasta !== e.next.hasta ? ' <span class="old">' + fmtInput(e.old.hasta) + '</span>' : '') + '</div>' +
           (e.todas ? '<div class="hint">KDMs para los 5 servidores: todas las salas</div>' : '') +
@@ -1309,7 +1480,7 @@ function mostraSend(auto){
         return sb(MOSTRA_TABLE + '?row_id=eq.' + encodeURIComponent(e.id), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ kdm: e.next, enc: 2 })
+          body: JSON.stringify(e.next ? { kdm: e.next, enc: e.encNext } : { enc: e.encNext })
         }).then(function(){ hechos++; }, function(err){ fallo = err; });
       });
     });
